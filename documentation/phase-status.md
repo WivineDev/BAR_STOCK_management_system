@@ -1,0 +1,51 @@
+# Development phase report
+
+## Phase 1: foundation and first transactional slice
+
+**Completed:** created the React/Vite frontend and Express/MySQL backend, migrations, environment templates, and user/developer documentation. Implemented owner bootstrap and login, coarse role-gated staff accounts, products and package conversions, suppliers and purchase receiving with weighted-average cost, inventory adjustments, customer balances and payments, split-payment POS sales, receipts, expenses, cash sessions and reconciliation, dashboard metrics, reports, and audit viewing.
+
+**Main workflows and pages:** sign-in, dashboard, products, inventory, POS, sales, purchases, suppliers, customers/credit, expenses, cash, reports, and users. These are connected to the API and MySQL; the interface is not a static mockup.
+
+## Phase 2: transactional returns
+
+**Completed:** added migrations `0003_transaction_returns.sql` and `0004_sale_category_snapshot.sql`; sale item lines retain their unit conversion factor and category name at the time of sale. Added sales returns and purchase returns with item-level limits against original quantities, transaction-scoped idempotency keys, original transaction pricing, debt/payable adjustments, refunds, stock effects, audit entries, and cash movements. Sales returns can restore accepted items to saleable stock; damaged returns leave their cost in cost of goods sold. Reports subtract returns in the date period they are recorded.
+
+**Return settlement rules:** sales returns reduce outstanding customer debt first. Any excess must be refunded and cannot exceed the net amount collected. Purchase returns reduce the purchase payable first; any excess must be received as an immediate supplier refund. Cash refunds and receipts require an open cash session. Carry-forward supplier credits are not supported.
+
+**Files:** see `backend/src/routes/business.js`, `backend/database/migrations/0003_transaction_returns.sql`, `frontend/src/pages/Sales.jsx`, `frontend/src/pages/Purchases.jsx`, and updated API, database, architecture, user, testing, and installation documentation.
+
+**Database:** added `sales_returns`, `sales_return_items`, `sales_return_payments`, `purchase_returns`, `purchase_return_items`, and `purchase_return_payments`; added `sale_items.factor_to_base`, `category_id`, and `category_name` as historical snapshots.
+
+**APIs:** `POST /sales/:saleId/returns`, `GET /purchases/:purchaseId`, and `POST /purchases/:purchaseId/returns`. See [API documentation](api-documentation.md) for payloads and limits.
+
+**Verification:** five automated unit tests pass. The API integration workflow passes against an isolated XAMPP MySQL database and includes authentication/role enforcement, categories and product edits, zero low-stock threshold, package conversion, purchase receiving and weighted-average cost, split payments, debt, both return types, return idempotency and quantity limits, stock restoration/removal, cash refund reconciliation, supplier payable credit, insufficient stock, dashboard values, category history snapshots, and return-adjusted reports. Vite production build succeeds. The local app database reports all four migrations applied. npm install's audit reported zero known vulnerabilities; a later standalone audit could not complete because the npm registry audit endpoint returned an error, so there is no current standalone audit result.
+
+## Phase 3: product categories and editing
+
+**Completed:** added category creation, rename, archive, and restore APIs and screens; products can be categorized at creation and recategorized when edited. Sales reports now group net quantities and revenue by category. Product edits preserve the original base unit and weighted-average cost. Fixed the default product entry failure: a zero low-stock threshold is now accepted by server validation.
+
+**Verification:** integration covers category create/archive, product assignment/editing, category report aggregation, and product creation with a zero threshold.
+
+## Outstanding before commercial use
+
+- Customer/supplier statements and transaction history screens.
+- Granular permission configuration, password change/reset, and hardened login-attempt protection.
+- Notifications and business settings, including localization and reviewed Rwanda tax configuration.
+- Report filters beyond date range and PDF/XLSX export.
+- Scheduled backups, retention, and tested restore procedures.
+- Production configuration, security review, monitoring, and verified deployment.
+- Concurrency, database failure/recovery, cross-tenant isolation, and backup restore testing.
+- Cash tender/change and tax/discount calculations.
+- Return UI currently supports one settlement method per return; supplier overpayments require an immediate refund instead of a carry-forward credit.
+
+Do not treat this build as a complete commercial release or as the only ledger for a live business.
+
+## Local database and repository state
+
+The ignored local `backend/.env` points to the fresh `bssbms_app_20261105_484744` database. The pre-existing populated `bssbms` database has a different legacy schema; it was left untouched, and the migration runner refuses to apply this app's migrations to an unmarked existing database. The app database remains available for first-owner setup.
+
+The workspace has a local `main` branch and no configured Git remote, GitHub branches, pull request, or production deployment.
+
+## Next phase
+
+Implement granular role permissions, then customer/supplier statements and business settings. Continue with the backup and recovery workflow, expanded isolation/failure/concurrency tests, and production preparation. Do not claim production readiness before the remaining requirements and deployment criteria pass.

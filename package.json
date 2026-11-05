@@ -1,0 +1,14 @@
+{
+  "name": "bssbms",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Bar Stock, Sales and Business Management System",
+  "workspaces": ["frontend", "backend"],
+  "scripts": {
+    "dev": "concurrently -k \"npm run dev -w backend\" \"npm run dev -w frontend\"",
+    "build": "npm run build -w frontend",
+    "start": "npm run start -w backend",
+    "test": "npm run test -w backend"
+  },
+  "devDependencies": { "concurrently": "^9.2.1" }
+}
