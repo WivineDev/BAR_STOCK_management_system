@@ -1,32 +1,38 @@
-import mysql from 'mysql2/promise';
 import dotenv from 'dotenv';
+import { PrismaClient } from '@prisma/client';
 
 dotenv.config();
 
-export const pool = mysql.createPool({
-  host: process.env.DB_HOST || '127.0.0.1',
-  port: Number(process.env.DB_PORT || 3306),
-  database: process.env.DB_NAME || 'bssbms',
-  user: process.env.DB_USER || 'root',
-  password: process.env.DB_PASSWORD || '',
-  waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0,
-  decimalNumbers: false,
-  timezone: 'Z',
-});
+if (!process.env.DATABASE_URL) {
+  const username = encodeURIComponent(process.env.DB_USER || 'root');
+  const password = encodeURIComponent(process.env.DB_PASSWORD || '');
+  const host = process.env.DB_HOST || '127.0.0.1';
+  const port = Number(process.env.DB_PORT || 3306);
+  const database = encodeURIComponent(process.env.DB_NAME || 'bssbms');
+  process.env.DATABASE_URL = `mysql://${username}:${password}@${host}:${port}/${database}`;
+}
+
+export const prisma = new PrismaClient();
+
+function isReadQuery(sql) {
+  return /^(SELECT|SHOW|DESCRIBE|EXPLAIN|WITH)\b/i.test(sql.trimStart());
+}
+
+function createSqlClient(client) {
+  return {
+    async execute(sql, values = []) {
+      if (isReadQuery(sql)) return [await client.$queryRawUnsafe(sql, ...values)];
+      const affectedRows = await client.$executeRawUnsafe(sql, ...values);
+      return [{ affectedRows }];
+    },
+  };
+}
+
+export const pool = createSqlClient(prisma);
 
 export async function withTransaction(work) {
-  const connection = await pool.getConnection();
-  try {
-    await connection.beginTransaction();
-    const result = await work(connection);
-    await connection.commit();
-    return result;
-  } catch (error) {
-    await connection.rollback();
-    throw error;
-  } finally {
-    connection.release();
-  }
+  return prisma.$transaction((transaction) => work(createSqlClient(transaction)), {
+    maxWait: 10_000,
+    timeout: 30_000,
+  });
 }

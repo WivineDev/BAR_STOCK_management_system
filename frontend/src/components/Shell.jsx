@@ -1,7 +1,20 @@
+import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
-import { BarChart3, Beer, Boxes, CircleDollarSign, FolderTree, LayoutDashboard, LogOut, Menu, Receipt, ShoppingCart, Truck, Users } from 'lucide-react';
+import {
+  BarChart3,
+  Beer,
+  Boxes,
+  CircleDollarSign,
+  FolderTree,
+  LayoutDashboard,
+  LogOut,
+  Menu,
+  Receipt,
+  ShoppingCart,
+  Truck,
+  Users,
+} from 'lucide-react';
 import { useAuth } from '../state/AuthContext.jsx';
-import { useState } from 'react';
 
 const navigation = [
   { to: '/', label: 'Overview', icon: LayoutDashboard, end: true },
@@ -18,16 +31,102 @@ const navigation = [
   { to: '/cash', label: 'Cash management', icon: CircleDollarSign, roles: ['owner', 'manager', 'cashier', 'accountant'] },
   { to: '/users', label: 'Users', icon: Users, roles: ['owner'] },
 ];
-const titles = { '/': 'Overview', '/pos': 'Point of sale', '/sales': 'Sales', '/products': 'Products', '/categories': 'Categories', '/inventory': 'Inventory', '/purchases': 'Purchases', '/suppliers': 'Suppliers', '/customers': 'Customers & credit', '/reports': 'Reports', '/expenses': 'Expenses', '/cash': 'Cash management', '/users': 'Users' };
+
+const titles = {
+  '/': 'Overview',
+  '/pos': 'Point of sale',
+  '/sales': 'Sales',
+  '/products': 'Products',
+  '/categories': 'Categories',
+  '/inventory': 'Inventory',
+  '/purchases': 'Purchases',
+  '/suppliers': 'Suppliers',
+  '/customers': 'Customers & credit',
+  '/reports': 'Reports',
+  '/expenses': 'Expenses',
+  '/cash': 'Cash management',
+  '/users': 'Users',
+};
+
 export default function Shell() {
-  const { user, logout } = useAuth(); const [open, setOpen] = useState(false); const location = useLocation();
-  return <div className="app-shell">
-    <aside className={`sidebar ${open ? 'sidebar-open' : ''}`}>
-      <div className="brand"><div className="brand-mark"><Beer size={20} /></div><div><b>barwise</b><small>STOCK & SALES</small></div></div>
-      <div className="side-label">WORKSPACE</div>
-      <nav>{navigation.filter((item) => !item.roles || item.roles.includes(user?.role)).map(({ to, label, icon: Icon, end }) => <NavLink key={to} to={to} end={end} onClick={() => setOpen(false)} className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}><Icon size={18} strokeWidth={1.8} /><span>{label}</span>{label === 'Inventory' && <span className="nav-dot" />}</NavLink>)}</nav>
-      <div className="sidebar-bottom"><div className="help-card"><div className="help-icon"><BarChart3 size={17} /></div><b>Built for the daily shift</b><p>Stock, sales, and cash together in one place.</p></div><button className="profile-button" onClick={logout}><div className="avatar">{(user?.name || 'O').slice(0,1).toUpperCase()}</div><div className="profile-copy"><b>{user?.name}</b><small>{user?.role || 'Owner'}</small></div><LogOut size={16} /></button></div>
-    </aside>
-    <main className="main-panel"><header className="topbar"><button className="mobile-menu icon-button" onClick={() => setOpen(!open)} aria-label="Toggle navigation"><Menu size={19} /></button><div className="crumb">Workspace <span>/</span> <b>{titles[location.pathname] || 'Overview'}</b></div><div className="top-actions"><div className="business-chip"><span className="status-pip" /> {user?.businessName || 'My business'}</div><div className="avatar avatar-small">{(user?.name || 'O').slice(0,1).toUpperCase()}</div></div></header><div className="page-wrap"><Outlet /></div></main>
-  </div>;
+  const { user, logout } = useAuth();
+  const [open, setOpen] = useState(false);
+  const location = useLocation();
+  const initials = (user?.name || 'O').slice(0, 1).toUpperCase();
+
+  useEffect(() => setOpen(false), [location.pathname]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    function closeOnEscape(event) {
+      if (event.key === 'Escape') setOpen(false);
+    }
+    document.addEventListener('keydown', closeOnEscape);
+    return () => document.removeEventListener('keydown', closeOnEscape);
+  }, [open]);
+
+  return (
+    <div className="app-shell">
+      <aside className={`sidebar ${open ? 'sidebar-open' : ''}`}>
+        <div className="brand">
+          <div className="brand-mark"><Beer size={20} /></div>
+          <div><b>Umucyo bar</b><small>STOCK &amp; SALES</small></div>
+        </div>
+        <div className="side-label">WORKSPACE</div>
+        <nav id="primary-navigation">
+          {navigation.filter((item) => !item.roles || item.roles.includes(user?.role)).map(({ to, label, icon: Icon, end }) => (
+            <NavLink
+              key={to}
+              to={to}
+              end={end}
+              onClick={() => setOpen(false)}
+              className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
+            >
+              <Icon size={18} strokeWidth={1.8} />
+              <span>{label}</span>
+              {label === 'Inventory' && <span className="nav-dot" />}
+            </NavLink>
+          ))}
+        </nav>
+        <div className="sidebar-bottom">
+          <div className="help-card">
+            <div className="help-icon"><BarChart3 size={17} /></div>
+            <b>Built for the daily shift</b>
+            <p>Stock, sales, and cash together in one place.</p>
+          </div>
+          <div className="profile-button">
+            <div className="avatar">{initials}</div>
+            <div className="profile-copy">
+              <b>{user?.name}</b>
+              <small>{user?.role || 'Owner'}</small>
+            </div>
+          </div>
+        </div>
+      </aside>
+      {open && <button className="sidebar-backdrop" type="button" aria-label="Close navigation" onClick={() => setOpen(false)} />}
+      <main className="main-panel">
+        <header className="topbar">
+          <button
+            className="mobile-menu icon-button"
+            onClick={() => setOpen(!open)}
+            aria-label="Toggle navigation"
+            aria-expanded={open}
+            aria-controls="primary-navigation"
+          >
+            <Menu size={19} />
+          </button>
+          <div className="crumb">Workspace <span>/</span> <b>{titles[location.pathname] || 'Overview'}</b></div>
+          <div className="top-actions">
+            <div className="business-chip"><span className="status-pip" /> {user?.businessName || 'Umucyo bar'}</div>
+            <div className="avatar avatar-small" aria-label={`Signed in as ${user?.name || 'owner'}`}>{initials}</div>
+            <button className="button button-quiet logout-action" onClick={logout} title="Sign out of your account">
+              <LogOut size={15} />
+              <span>Log out</span>
+            </button>
+          </div>
+        </header>
+        <div className="page-wrap"><Outlet /></div>
+      </main>
+    </div>
+  );
 }
