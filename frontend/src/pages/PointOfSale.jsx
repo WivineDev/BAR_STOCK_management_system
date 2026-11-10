@@ -8,6 +8,7 @@ import api from '../services/api.js';
 import { useAuth } from '../state/AuthContext.jsx';
 import ReceiptCard from '../components/ReceiptCard.jsx';
 import { downloadReceipt } from '../utils/receipt.js';
+import { productImage } from '../utils/productImage.js';
 
 const money = (n) => new Intl.NumberFormat('en-RW', { style: 'currency', currency: 'RWF', maximumFractionDigits: 0 }).format(Number(n || 0));
 const cents = (value) => { const parsed = Number(value); return Number.isFinite(parsed) ? Math.round(parsed * 100) : 0; };
@@ -360,15 +361,22 @@ export default function PointOfSale() {
           {categories.map((category) => <button type="button" className={`pos-category-chip ${activeCategory === category ? 'active' : ''}`} key={category} onClick={() => setActiveCategory(activeCategory === category ? '' : category)}>{category}</button>)}
         </div>}
         {pickerView === 'tiles' ? <div className="picker-grid">{shown.map((product) => {
+          const photo = productImage(product);
           return <article className={`picker-card product-card ${stockState(product)}`} key={product.id}>
-            <span className="picker-product-icon"><GlassWater size={17} /></span>
+            {photo
+              ? <span className="picker-photo"><img src={photo} alt="" loading="lazy" decoding="async" /></span>
+              : <span className="picker-product-icon"><GlassWater size={17} /></span>}
             <b>{product.name}</b>
             <small>{product.sku ? `SKU ${product.sku} · ` : ''}{product.stockQuantity} {product.baseUnit}s available</small>
             <div className="unit-choice-list">{unitChoices(product)}</div>
           </article>;
         })}{!shown.length && <div className="picker-empty">No products match this search.</div>}</div> : <div className="picker-list">{shown.map((product) => {
+          const photo = productImage(product);
           return <div className={`picker-row ${stockState(product)}`} key={product.id}>
-            <div className="picker-row-copy"><b>{product.name}</b><small>{product.sku ? `SKU ${product.sku} · ` : ''}{product.stockQuantity} {product.baseUnit}s available</small></div>
+            <div className="picker-row-head">
+              <span className="picker-row-photo">{photo ? <img src={photo} alt="" loading="lazy" decoding="async" /> : <GlassWater size={15} />}</span>
+              <div className="picker-row-copy"><b>{product.name}</b><small>{product.sku ? `SKU ${product.sku} · ` : ''}{product.stockQuantity} {product.baseUnit}s available</small></div>
+            </div>
             <div className="unit-choice-list">{unitChoices(product)}</div>
           </div>;
         })}{!shown.length && <div className="picker-empty">No products match this search.</div>}</div>}
@@ -380,7 +388,7 @@ export default function PointOfSale() {
           const lineTotal = Math.round(Number(item.unit.sellingPrice) * 100) * item.qty;
           const atMax = item.qty >= maxQtyFor(item);
           return <div className="cart-line" key={item.key}>
-            <div className="cart-line-icon"><GlassWater size={15} /></div>
+            <div className="cart-line-icon">{productImage(item.product) ? <img src={productImage(item.product)} alt="" loading="lazy" /> : <GlassWater size={15} />}</div>
             <div className="cart-line-copy"><b>{item.product.name} · {item.unit.unitName}</b><small>{money(item.unit.sellingPrice)} each</small></div>
             <div className="quantity-control">
               <button type="button" onClick={() => changeQty(item.key, -1)} aria-label="Decrease quantity"><Minus size={13} /></button>
@@ -440,7 +448,7 @@ export default function PointOfSale() {
           const lineTotal = Math.round(Number(item.unit.sellingPrice) * 100) * item.qty;
           const atMax = item.qty >= maxQtyFor(item);
           return <div className="cart-line" key={item.key}>
-            <div className="cart-line-icon"><GlassWater size={15} /></div>
+            <div className="cart-line-icon">{productImage(item.product) ? <img src={productImage(item.product)} alt="" loading="lazy" /> : <GlassWater size={15} />}</div>
             <div className="cart-line-copy"><b>{item.product.name} · {item.unit.unitName}</b><small>{money(item.unit.sellingPrice)} each</small></div>
             <div className="quantity-control">
               <button type="button" onClick={() => changeQty(item.key, -1)} aria-label="Decrease quantity"><Minus size={13} /></button>

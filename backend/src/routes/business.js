@@ -11,6 +11,15 @@ const router = Router();
 router.use(authenticate);
 const businessScope = (req) => [req.user.businessId];
 const METHODS = ['cash', 'mobile_money', 'bank_transfer', 'card'];
+// Catalogue imagery shipped with the frontend in frontend/public/images/products/.
+const PRODUCT_IMAGES = ['beer.jpg', 'wine.jpg', 'spirit.jpg', 'fanta.jpg', 'cola.jpg', 'soda.jpg', 'water.jpg', 'juice.jpg', 'energy.jpg', 'coffee.jpg'];
+// undefined = leave the current image untouched; null/'' = cleared; otherwise must be a shipped photo.
+function imageChoice(value) {
+  if (value === undefined) return undefined;
+  if (value === null || value === '') return null;
+  if (typeof value !== 'string' || !PRODUCT_IMAGES.includes(value)) fail(400, 'Choose one of the available product images');
+  return value;
+}
 const moneyText = (amount) => fromMinor(amount);
 const signedMinor = (value, field = 'amount') => String(value ?? '').trim().startsWith('-')
   ? -toMinor(String(value).trim().slice(1), field)
@@ -39,7 +48,7 @@ function nonNegativeQuantity(value, field) {
 router.get('/products', asyncRoute(async (req, res) => {
   const search = typeof req.query.search === 'string' ? `%${req.query.search.trim().slice(0, 80)}%` : null;
   const [items] = await pool.execute(
-    `SELECT p.id, p.name, p.sku,p.category_id AS categoryId,pc.name AS categoryName,p.base_unit AS baseUnit, p.selling_price AS sellingPrice, p.cost_price AS costPrice,
+    `SELECT p.id, p.name, p.sku, p.image_path AS imagePath, p.category_id AS categoryId,pc.name AS categoryName,p.base_unit AS baseUnit, p.selling_price AS sellingPrice, p.cost_price AS costPrice,
       p.low_stock_threshold AS lowStockThreshold, p.active, COALESCE(i.quantity, 0) AS stockQuantity
      FROM products p LEFT JOIN inventory i ON i.product_id = p.id AND i.branch_id = p.branch_id
      LEFT JOIN product_categories pc ON pc.id=p.category_id AND pc.business_id=p.business_id
@@ -50,12 +59,13 @@ router.get('/products', asyncRoute(async (req, res) => {
 }));
 
 router.post('/products', authorize('owner', 'manager'), asyncRoute(async (req, res) => {
-  const { name, sku = null, categoryId = null, baseUnit = 'bottle', sellingPrice, costPrice, lowStockThreshold = '0' } = req.body || {};
+  const { name, sku = null, imageKey = '', categoryId = null, baseUnit = 'bottle', sellingPrice, costPrice, lowStockThreshold = '0' } = req.body || {};
   const label = normalizeLabel(name, 'Product name');
   const unit = normalizeLabel(baseUnit, 'Base unit', 40);
   const sell = moneyText(toMinor(sellingPrice, 'Selling price'));
   const cost = moneyText(toMinor(costPrice, 'Cost price'));
   const threshold = nonNegativeQuantity(lowStockThreshold, 'Low stock threshold');
+  const image = imageChoice(imageKey);
   if (sku !== null && (typeof sku !== 'string' || sku.trim().length > 60)) fail(400, 'SKU must be 60 characters or fewer');
   const productId = randomUUID();
   const baseUnitId = randomUUID();
@@ -69,15 +79,15 @@ router.post('/products', authorize('owner', 'manager'), asyncRoute(async (req, r
     if (!branches.length) fail(400, 'This business has no branch configured');
     const branchId = branches[0].id;
     await connection.execute(
-      `INSERT INTO products (id, business_id, branch_id, category_id, name, sku, base_unit, selling_price, cost_price, low_stock_threshold)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [productId, req.user.businessId, branchId, categoryId, label, sku?.trim() || null, unit, sell, cost, threshold],
+      `INSERT INTO products (id, business_id, branch_id, category_id, name, sku, image_path, base_unit, selling_price, cost_price, low_stock_threshold)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [productId, req.user.businessId, branchId, categoryId, label, sku?.trim() || null, image ?? null, unit, sell, cost, threshold],
     );
     await connection.execute('INSERT INTO inventory (id, business_id, branch_id, product_id, quantity) VALUES (UUID(), ?, ?, ?, 0)', [req.user.businessId, branchId, productId]);
     await connection.execute('INSERT INTO product_units (id, business_id, product_id, unit_name, factor_to_base, selling_price, purchase_price, is_base) VALUES (?, ?, ?, ?, 1, ?, ?, 1)', [baseUnitId, req.user.businessId, productId, unit, sell, cost]);
-    await writeAudit(connection, { businessId: req.user.businessId, branchId, userId: req.user.id, action: 'created', module: 'products', recordId: productId, details: { name: label, sku: sku?.trim() || null } });
+    await writeAudit(connection, { businessId: req.user.businessId, branchId, userId: req.user.id, action: 'created', module: 'products', recordId: productId, details: { name: label, sku: sku?.trim() || null, image: image ?? null } });
     return productId;
   });
-  const [rows] = await pool.execute('SELECT p.id,p.name,p.sku,p.category_id AS categoryId,pc.name AS categoryName,p.base_unit AS baseUnit,p.selling_price AS sellingPrice,p.cost_price AS costPrice,p.low_stock_threshold AS lowStockThreshold,0 AS stockQuantity FROM products p LEFT JOIN product_categories pc ON pc.id=p.category_id AND pc.business_id=p.business_id WHERE p.id=? AND p.business_id=?', [id, req.user.businessId]);
+  const [rows] = await pool.execute('SELECT p.id,p.name,p.sku,p.image_path AS imagePath,p.category_id AS categoryId,pc.name AS categoryName,p.base_unit AS baseUnit,p.selling_price AS sellingPrice,p.cost_price AS costPrice,p.low_stock_threshold AS lowStockThreshold,0 AS stockQuantity FROM products p LEFT JOIN product_categories pc ON pc.id=p.category_id AND pc.business_id=p.business_id WHERE p.id=? AND p.business_id=?', [id, req.user.businessId]);
   res.status(201).json({ product: rows[0] });
 }));
 
@@ -85,11 +95,12 @@ router.patch('/products/:productId', authorize('owner', 'manager'), asyncRoute(a
   const name = normalizeLabel(req.body?.name, 'Product name');
   const sku = req.body?.sku === '' ? null : req.body?.sku;
   if (sku !== null && (typeof sku !== 'string' || sku.trim().length > 60)) fail(400, 'SKU must be 60 characters or fewer');
+  const image = imageChoice(req.body?.imageKey);
   const categoryId = req.body?.categoryId || null;
   const sellingPrice = moneyText(toMinor(req.body?.sellingPrice, 'Selling price'));
   const threshold = nonNegativeQuantity(req.body?.lowStockThreshold, 'Low stock threshold');
   const result = await withTransaction(async (connection) => {
-    const [products] = await connection.execute('SELECT id,branch_id AS branchId,category_id AS categoryId FROM products WHERE id=? AND business_id=? AND active=1 FOR UPDATE', [req.params.productId, req.user.businessId]);
+    const [products] = await connection.execute('SELECT id,branch_id AS branchId,category_id AS categoryId,image_path AS imagePath FROM products WHERE id=? AND business_id=? AND active=1 FOR UPDATE', [req.params.productId, req.user.businessId]);
     if (!products.length) fail(404, 'Product was not found');
     if (categoryId !== null) {
       if (typeof categoryId !== 'string') fail(400, 'Choose a valid product category');
@@ -97,10 +108,11 @@ router.patch('/products/:productId', authorize('owner', 'manager'), asyncRoute(a
       if (!categories.length) fail(400, 'The selected category is unavailable');
       if (categories[0].archivedAt && products[0].categoryId !== categoryId) fail(400, 'The selected category is unavailable');
     }
-    await connection.execute('UPDATE products SET name=?,sku=?,category_id=?,selling_price=?,low_stock_threshold=? WHERE id=? AND business_id=?', [name, sku?.trim() || null, categoryId, sellingPrice, threshold, req.params.productId, req.user.businessId]);
+    const nextImage = image === undefined ? products[0].imagePath : image;
+    await connection.execute('UPDATE products SET name=?,sku=?,image_path=?,category_id=?,selling_price=?,low_stock_threshold=? WHERE id=? AND business_id=?', [name, sku?.trim() || null, nextImage, categoryId, sellingPrice, threshold, req.params.productId, req.user.businessId]);
     await connection.execute('UPDATE product_units SET selling_price=? WHERE product_id=? AND business_id=? AND is_base=1', [sellingPrice, req.params.productId, req.user.businessId]);
-    await writeAudit(connection, { businessId: req.user.businessId, branchId: products[0].branchId, userId: req.user.id, action: 'updated', module: 'products', recordId: req.params.productId, details: { name, sku: sku?.trim() || null, categoryId, sellingPrice, lowStockThreshold: threshold } });
-    const [rows] = await connection.execute('SELECT p.id,p.name,p.sku,p.category_id AS categoryId,pc.name AS categoryName,p.base_unit AS baseUnit,p.selling_price AS sellingPrice,p.cost_price AS costPrice,p.low_stock_threshold AS lowStockThreshold,COALESCE(i.quantity,0) AS stockQuantity FROM products p LEFT JOIN product_categories pc ON pc.id=p.category_id AND pc.business_id=p.business_id LEFT JOIN inventory i ON i.product_id=p.id AND i.branch_id=p.branch_id WHERE p.id=? AND p.business_id=?', [req.params.productId, req.user.businessId]);
+    await writeAudit(connection, { businessId: req.user.businessId, branchId: products[0].branchId, userId: req.user.id, action: 'updated', module: 'products', recordId: req.params.productId, details: { name, sku: sku?.trim() || null, image: nextImage, categoryId, sellingPrice, lowStockThreshold: threshold } });
+    const [rows] = await connection.execute('SELECT p.id,p.name,p.sku,p.image_path AS imagePath,p.category_id AS categoryId,pc.name AS categoryName,p.base_unit AS baseUnit,p.selling_price AS sellingPrice,p.cost_price AS costPrice,p.low_stock_threshold AS lowStockThreshold,COALESCE(i.quantity,0) AS stockQuantity FROM products p LEFT JOIN product_categories pc ON pc.id=p.category_id AND pc.business_id=p.business_id LEFT JOIN inventory i ON i.product_id=p.id AND i.branch_id=p.branch_id WHERE p.id=? AND p.business_id=?', [req.params.productId, req.user.businessId]);
     return rows[0];
   });
   res.json({ product: result });
@@ -145,7 +157,7 @@ router.get('/products/:productId/units', asyncRoute(async (req, res) => {
 
 router.get('/pos/catalog', authorize('owner', 'manager', 'cashier'), asyncRoute(async (req, res) => {
   const [products] = await pool.execute(
-    `SELECT p.id,p.name,p.sku,p.category_id AS categoryId,pc.name AS categoryName,p.base_unit AS baseUnit,p.selling_price AS sellingPrice,p.cost_price AS costPrice,
+    `SELECT p.id,p.name,p.sku,p.image_path AS imagePath,p.category_id AS categoryId,pc.name AS categoryName,p.base_unit AS baseUnit,p.selling_price AS sellingPrice,p.cost_price AS costPrice,
       p.low_stock_threshold AS lowStockThreshold,COALESCE(i.quantity,0) AS stockQuantity
      FROM products p LEFT JOIN inventory i ON i.product_id=p.id AND i.branch_id=p.branch_id LEFT JOIN product_categories pc ON pc.id=p.category_id AND pc.business_id=p.business_id
      WHERE p.business_id=? AND p.active=1 ORDER BY p.name LIMIT 250`, businessScope(req),

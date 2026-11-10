@@ -14,6 +14,7 @@ const migrations = [
   { version: '0004_sale_category_snapshot', filename: './migrations/0004_sale_category_snapshot.sql' },
   { version: '0005_table_service', filename: './migrations/0005_table_service.sql' },
   { version: '0006_payment_references', filename: './migrations/0006_payment_references.sql' },
+  { version: '0007_product_images', filename: './migrations/0007_product_images.sql' },
 ];
 
 async function executeSqlFile(filename) {
