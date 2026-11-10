@@ -101,7 +101,7 @@ async function loadSessionDetail(connection, sessionId, businessId) {
     [sessionId],
   );
   const [payments] = await connection.execute(
-    `SELECT p.id, p.method, p.amount, p.created_at AS createdAt, u.name AS receivedByName
+    `SELECT p.id, p.method, p.reference, p.amount, p.created_at AS createdAt, u.name AS receivedByName
      FROM table_session_payments p LEFT JOIN users u ON u.id = p.user_id
      WHERE p.table_session_id = ? ORDER BY p.created_at`,
     [sessionId],
@@ -460,8 +460,13 @@ router.post('/table-sessions/:sessionId/payments', authorize('owner', 'manager',
   const amountMinor = toMinor(req.body?.amount, 'Payment amount');
   if (!METHODS.includes(method)) fail(400, 'Choose a supported payment method');
   if (amountMinor <= 0n) fail(400, 'Payment amounts must be greater than zero');
+  let reference = null;
+  if (req.body?.reference !== undefined && req.body?.reference !== null) {
+    if (typeof req.body.reference !== 'string') fail(400, 'Payment references must be text');
+    reference = req.body.reference.trim().slice(0, 120) || null;
+  }
   const payment = await withTransaction(async (connection) => {
-    const [existing] = await connection.execute('SELECT id, method, amount FROM table_session_payments WHERE business_id = ? AND idempotency_key = ?', [req.user.businessId, key]);
+    const [existing] = await connection.execute('SELECT id, method, reference, amount FROM table_session_payments WHERE business_id = ? AND idempotency_key = ?', [req.user.businessId, key]);
     if (existing.length) return { ...existing[0], repeated: true };
     const [sessions] = await connection.execute("SELECT id FROM table_sessions WHERE id = ? AND business_id = ? AND status = 'open' FOR UPDATE", [req.params.sessionId, req.user.businessId]);
     if (!sessions.length) fail(404, 'This table session is closed or was not found');
@@ -474,7 +479,7 @@ router.post('/table-sessions/:sessionId/payments', authorize('owner', 'manager',
     const [branchRows] = await connection.execute('SELECT branch_id AS branchId FROM users WHERE id = ? AND business_id = ?', [req.user.id, req.user.businessId]);
     const branchId = branchRows[0].branchId;
     const paymentId = randomUUID();
-    await connection.execute('INSERT INTO table_session_payments (id, business_id, table_session_id, user_id, method, amount, idempotency_key, cash_session_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [paymentId, req.user.businessId, req.params.sessionId, req.user.id, method, moneyText(amountMinor), key, method === 'cash' ? sessions2[0].id : null]);
+    await connection.execute('INSERT INTO table_session_payments (id, business_id, table_session_id, user_id, method, reference, amount, idempotency_key, cash_session_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', [paymentId, req.user.businessId, req.params.sessionId, req.user.id, method, reference, moneyText(amountMinor), key, method === 'cash' ? sessions2[0].id : null]);
     if (method === 'cash') {
       await connection.execute(
         `INSERT INTO cash_movements (id, business_id, branch_id, session_id, user_id, movement_type, direction, amount, reference_type, reference_id, notes)
@@ -482,8 +487,8 @@ router.post('/table-sessions/:sessionId/payments', authorize('owner', 'manager',
         [req.user.businessId, branchId, sessions2[0].id, req.user.id, moneyText(amountMinor), paymentId, 'Table bill payment'],
       );
     }
-    await writeAudit(connection, { businessId: req.user.businessId, branchId, userId: req.user.id, action: 'recorded', module: 'table_session_payments', recordId: paymentId, details: { sessionId: req.params.sessionId, method, amount: moneyText(amountMinor) } });
-    return { id: paymentId, method, amount: moneyText(amountMinor), repeated: false };
+    await writeAudit(connection, { businessId: req.user.businessId, branchId, userId: req.user.id, action: 'recorded', module: 'table_session_payments', recordId: paymentId, details: { sessionId: req.params.sessionId, method, reference, amount: moneyText(amountMinor) } });
+    return { id: paymentId, method, reference, amount: moneyText(amountMinor), repeated: false };
   });
   res.status(payment.repeated ? 200 : 201).json({ payment });
 }));
@@ -534,9 +539,9 @@ router.post('/table-sessions/:sessionId/close', authorize('owner', 'manager', 'c
         [req.user.businessId, branchId, saleId, item.productId, item.productName, item.quantity, item.unitName, item.factorToBase, item.unitPrice, item.unitCost, item.lineTotal, item.lineCost],
       );
     }
-    const [sessionPayments] = await connection.execute('SELECT id, method, amount, user_id AS userId FROM table_session_payments WHERE table_session_id = ?', [req.params.sessionId]);
+    const [sessionPayments] = await connection.execute('SELECT id, method, reference, amount, user_id AS userId FROM table_session_payments WHERE table_session_id = ?', [req.params.sessionId]);
     for (const payment of sessionPayments) {
-      await connection.execute('INSERT INTO sale_payments (id, business_id, branch_id, sale_id, user_id, method, amount) VALUES (?, ?, ?, ?, ?, ?, ?)', [payment.id, req.user.businessId, branchId, saleId, payment.userId, payment.method, payment.amount]);
+      await connection.execute('INSERT INTO sale_payments (id, business_id, branch_id, sale_id, user_id, method, reference, amount) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [payment.id, req.user.businessId, branchId, saleId, payment.userId, payment.method, payment.reference, payment.amount]);
     }
     await connection.execute("UPDATE table_sessions SET status = 'closed', closed_at = CURRENT_TIMESTAMP, closed_by = ?, sale_id = ? WHERE id = ?", [req.user.id, saleId, req.params.sessionId]);
     await connection.execute("UPDATE bar_tables SET status = 'available' WHERE id = ? AND business_id = ?", [session.tableId, req.user.businessId]);

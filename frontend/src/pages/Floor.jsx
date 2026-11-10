@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Armchair, Clock, LayoutGrid, Loader2, Plus, Settings as SettingsIcon, Users } from 'lucide-react';
+import { Armchair, ConciergeBell, LayoutGrid, LoaderCircle, Plus, Settings as SettingsIcon, Timer } from 'lucide-react';
 import api from '../services/api.js';
 import { useAuth } from '../state/AuthContext.jsx';
 
@@ -55,7 +55,7 @@ export default function Floor() {
       {['owner', 'manager'].includes(user?.role) && <button className="button button-outline" onClick={() => navigate('/settings')}><SettingsIcon size={15} /> Configure floor</button>}
     </div>
     {error && <div className="notice notice-error">{error}</div>}
-    {loading ? <div className="panel floor-empty-state"><Loader2 size={20} className="spin" /> Loading the floor plan…</div> : <>
+    {loading ? <div className="panel floor-empty-state"><LoaderCircle size={20} className="spin" /> Loading the floor plan…</div> : <>
       {!tables.length ? <div className="panel floor-empty-state">
         <div className="empty-icon"><LayoutGrid size={22} /></div>
         <b>No tables configured yet</b>
@@ -95,15 +95,15 @@ export default function Floor() {
                   {table.name && <small className="table-card-name">{table.name}</small>}
                   <div className="table-card-meta">
                     <span><Armchair size={13} /> {table.capacity || '—'} seats</span>
-                    {occupied && <span><Users size={13} /> {table.waiterName || 'Unassigned'}</span>}
-                    {occupied && <span><Clock size={13} /> {elapsed(table.openedAt)}</span>}
+                    {occupied && <span><ConciergeBell size={13} /> {table.waiterName || 'Unassigned'}</span>}
+                    {occupied && <span><Timer size={13} /> {elapsed(table.openedAt)}</span>}
                   </div>
                   {occupied && <div className="table-card-bill">
                     <span>Bill {money(table.billTotal)}</span>
                     <span>Paid {money(table.paidTotal)}</span>
                     <b className={balance > 0 ? 'due' : 'settled'}>{balance > 0 ? `${money(balance)} due` : 'Settled'}</b>
                   </div>}
-                  {!occupied && table.effectiveStatus === 'available' && <div className="table-card-open">{busyTable === table.id ? <><Loader2 size={13} className="spin" /> Opening…</> : 'Tap to open service'}</div>}
+                  {!occupied && table.effectiveStatus === 'available' && <div className="table-card-open">{busyTable === table.id ? <><LoaderCircle size={13} className="spin" /> Opening…</> : 'Tap to open service'}</div>}
                   {(table.effectiveStatus === 'reserved' || table.effectiveStatus === 'out_of_service') && <div className="table-card-note">Not openable right now</div>}
                 </button>
               </article>;

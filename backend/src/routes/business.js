@@ -530,7 +530,7 @@ router.get('/sales/:saleId', asyncRoute(async (req, res) => {
      FROM sale_items si LEFT JOIN (SELECT sale_item_id,SUM(quantity) AS returnedQuantity,SUM(line_total) AS returnedTotal FROM sales_return_items WHERE business_id=? GROUP BY sale_item_id) r ON r.sale_item_id=si.id
      WHERE si.sale_id=? AND si.business_id=? ORDER BY si.created_at`, [req.user.businessId, req.params.saleId, req.user.businessId],
   );
-  const [payments] = await pool.execute('SELECT method,amount,created_at AS createdAt FROM sale_payments WHERE sale_id=? AND business_id=? ORDER BY created_at', [req.params.saleId, req.user.businessId]);
+  const [payments] = await pool.execute('SELECT method,reference,amount,created_at AS createdAt FROM sale_payments WHERE sale_id=? AND business_id=? ORDER BY created_at', [req.params.saleId, req.user.businessId]);
   const [returns] = await pool.execute('SELECT id,reference,total,credit_applied AS creditApplied,refund_amount AS refundAmount,reason,created_at AS createdAt FROM sales_returns WHERE sale_id=? AND business_id=? ORDER BY created_at DESC', [req.params.saleId, req.user.businessId]);
   const [refunds] = await pool.execute('SELECT COALESCE(SUM(amount),0) AS amount FROM sales_return_payments WHERE business_id=? AND return_id IN (SELECT id FROM sales_returns WHERE sale_id=? AND business_id=?)', [req.user.businessId, req.params.saleId, req.user.businessId]);
   res.json({ sale: { ...sales[0], items, payments, returns, refundedAmount: refunds[0].amount } });
@@ -679,7 +679,12 @@ router.post('/sales', authorize('owner', 'manager', 'cashier'), asyncRoute(async
       if (!METHODS.includes(payment.method)) fail(400, 'Choose a supported payment method');
       const amount = toMinor(payment.amount, 'Payment amount');
       if (amount === 0n) fail(400, 'Payment amounts must be greater than zero');
-      return { method: payment.method, amount };
+      let reference = null;
+      if (payment.reference !== undefined && payment.reference !== null) {
+        if (typeof payment.reference !== 'string') fail(400, 'Payment references must be text');
+        reference = payment.reference.trim().slice(0, 120) || null;
+      }
+      return { method: payment.method, amount, reference };
     });
     const paidMinor = paymentLines.reduce((sum, item) => sum + item.amount, 0n);
     if (paidMinor > totalMinor) fail(400, 'Payment total cannot exceed the sale total. Enter the amount applied to this sale.');
@@ -712,7 +717,7 @@ router.post('/sales', authorize('owner', 'manager', 'cashier'), asyncRoute(async
       );
     }
     for (const payment of paymentLines) {
-      await connection.execute('INSERT INTO sale_payments (id, business_id, branch_id, sale_id, user_id, method, amount) VALUES (UUID(), ?, ?, ?, ?, ?, ?)', [req.user.businessId, branchId, saleId, req.user.id, payment.method, moneyText(payment.amount)]);
+      await connection.execute('INSERT INTO sale_payments (id, business_id, branch_id, sale_id, user_id, method, reference, amount) VALUES (UUID(), ?, ?, ?, ?, ?, ?, ?)', [req.user.businessId, branchId, saleId, req.user.id, payment.method, payment.reference, moneyText(payment.amount)]);
       if (payment.method === 'cash') await connection.execute('INSERT INTO cash_movements (id, business_id, branch_id, session_id, user_id, movement_type, direction, amount, reference_type, reference_id, notes) VALUES (UUID(), ?, ?, ?, ?, \'sale_payment\', \'in\', ?, \'sale\', ?, ?)', [req.user.businessId, branchId, existingSession[0].id, req.user.id, moneyText(payment.amount), saleId, reference]);
     }
     await writeAudit(connection, { businessId: req.user.businessId, branchId, userId: req.user.id, action: 'completed', module: 'sales', recordId: saleId, reference, details: { subtotal: moneyText(subtotalMinor), discount: moneyText(discountMinor), total: moneyText(totalMinor), paid: moneyText(paidMinor), balance: moneyText(balanceMinor), lines: parsed.length } });

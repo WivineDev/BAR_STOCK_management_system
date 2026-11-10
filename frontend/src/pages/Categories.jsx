@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Archive, FolderTree, Plus, RotateCcw, X } from 'lucide-react';
+import { Archive, FolderTree, Plus, RotateCcw } from 'lucide-react';
 import api from '../services/api.js';
 
 export default function Categories() {

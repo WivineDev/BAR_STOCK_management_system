@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  Armchair, BadgePercent, Banknote, Barcode, Check, Clock, CreditCard, Download, GlassWater, LayoutGrid, Loader2,
-  Minus, Pause, Play, Plus, Printer, Search, ShoppingCart, Store, Trash2, UserRoundPlus, Users, UtensilsCrossed, X,
+  Armchair, BadgePercent, Banknote, Barcode, Check, Clock, Coins, Download, GlassWater, LayoutGrid, List, LoaderCircle,
+  LockKeyhole, Minus, Pause, Play, Plus, Printer, Search, ShoppingCart, Store, Trash2, UnlockKeyhole, UserRound,
+  UserRoundPlus, UtensilsCrossed, Wifi, WifiOff, X,
 } from 'lucide-react';
 import api from '../services/api.js';
 import { useAuth } from '../state/AuthContext.jsx';
@@ -37,6 +38,10 @@ export default function PointOfSale() {
   const [receipt, setReceipt] = useState(null);
   const [showCustomer, setShowCustomer] = useState(false); const [customerForm, setCustomerForm] = useState({ name: '', phone: '' });
   const [held, setHeld] = useState([]); const [showHeld, setShowHeld] = useState(false); const [holdLabel, setHoldLabel] = useState('');
+  const [online, setOnline] = useState(navigator.onLine);
+  const [now, setNow] = useState(() => new Date());
+  const [shift, setShift] = useState(null);
+  const [pickerView, setPickerView] = useState('tiles');
 
   async function loadProducts() { const { data } = await api.get('/pos/catalog'); setProducts(data.items); }
   async function loadCustomers() { const { data } = await api.get('/customers'); setCustomers(data.items); }
@@ -48,11 +53,24 @@ export default function PointOfSale() {
   }
   async function refreshSession() { if (sessionId) await loadSession(sessionId); await Promise.all([loadProducts(), loadOpenSessions(), loadFloor()]); }
 
+  async function loadShift() { try { const { data } = await api.get('/cash-sessions'); setShift(data.active || null); } catch { setShift(null); } }
+
   useEffect(() => {
     const param = new URLSearchParams(window.location.search).get('session');
-    Promise.all([loadProducts(), loadCustomers(), loadFloor(), loadOpenSessions()]).catch(() => setError('Products or customers could not be loaded.'));
+    Promise.all([loadProducts(), loadCustomers(), loadFloor(), loadOpenSessions(), loadShift()]).catch(() => setError('Products or customers could not be loaded.'));
     if (param) { setMode('table'); setSessionId(param); loadSession(param); }
     api.get('/floor/staff').then(({ data }) => setUsers(data.items)).catch(() => {});
+  }, []);
+
+  // Spec v2.1 §3.1: the POS header keeps cashier identity, shift status,
+  // connectivity and the current date/time visible while selling.
+  useEffect(() => {
+    const goOnline = () => setOnline(true);
+    const goOffline = () => setOnline(false);
+    window.addEventListener('online', goOnline);
+    window.addEventListener('offline', goOffline);
+    const ticker = setInterval(() => setNow(new Date()), 30000);
+    return () => { window.removeEventListener('online', goOnline); window.removeEventListener('offline', goOffline); clearInterval(ticker); };
   }, []);
 
   const categories = useMemo(() => { const found = new Set(); products.forEach((product) => { if (product.categoryName) found.add(product.categoryName); }); return [...found].sort(); }, [products]);
@@ -62,7 +80,7 @@ export default function PointOfSale() {
   const discount = canDiscount ? Math.min(Math.max(0, cents(discountInput)), subtotal) : 0;
   const total = subtotal - discount;
   const defaultPayment = total > 0 ? String(total / 100) : '';
-  const effectivePayments = payments.map((line) => ({ method: line.method, amount: line.autoFill ? defaultPayment : line.amount }));
+  const effectivePayments = payments.map((line) => ({ method: line.method, amount: line.autoFill ? defaultPayment : line.amount, reference: line.reference?.trim() || null }));
   const applied = effectivePayments.reduce((sum, line) => sum + cents(line.amount), 0);
 
   function switchMode(next) {
@@ -109,6 +127,19 @@ export default function PointOfSale() {
     setQtyDrafts((drafts) => { const next = { ...drafts }; delete next[key]; return next; });
   }
   function applyDiscountPercent(percent) { setDiscountInput(String(Math.round((subtotal * percent) / 100) / 100)); }
+  function stockState(product) {
+    const stock = Number(product.stockQuantity) || 0;
+    if (stock <= 0) return 'is-out';
+    return stock <= Number(product.lowStockThreshold || 0) ? 'is-low' : '';
+  }
+  function unitChoices(product) {
+    const stock = Number(product.stockQuantity) || 0;
+    return product.units.map((unit) => {
+      const added = cart.find((item) => item.product.id === product.id && item.unit.id === unit.id)?.qty || 0;
+      const inStock = stock >= (added + 1) * Number(unit.factorToBase);
+      return <button type="button" className="unit-choice" key={unit.id} disabled={!inStock} onClick={() => add(product, unit)}><span>Add {unit.unitName}</span><b>{money(unit.sellingPrice)}</b></button>;
+    });
+  }
   function searchKeyDown(event) {
     if (event.key !== 'Enter') return;
     event.preventDefault();
@@ -126,13 +157,13 @@ export default function PointOfSale() {
         customerId: customerId || null,
         items: cart.map((item) => ({ productId: item.product.id, unitId: item.unit.id, quantity: String(Math.min(item.qty, maxQtyFor(item))) })),
         discount: discount > 0 ? String(discount / 100) : '0',
-        payments: effectivePayments.filter((line) => line.amount !== '' && line.amount !== undefined).map(({ method, amount }) => ({ method, amount })),
+        payments: effectivePayments.filter((line) => line.amount !== '' && line.amount !== undefined).map(({ method, amount, reference }) => ({ method, amount, ...(reference ? { reference } : {}) })),
       }, { headers: { 'Idempotency-Key': crypto.randomUUID() } });
       const detail = await api.get(`/sales/${data.sale.id}`);
       setReceipt(detail.data.sale);
       setCart([]); setQtyDrafts({}); setDiscountInput(''); setCustomerId(''); setQuery(''); setActiveCategory('');
       setPayments([{ method: 'cash', amount: '', autoFill: true }]);
-      await loadProducts();
+      await Promise.all([loadProducts(), loadShift()]);
     } catch (err) { setError(err.response?.data?.error || 'Sale could not be completed.'); }
     finally { setBusy(false); }
   }
@@ -184,7 +215,8 @@ export default function PointOfSale() {
   async function takePayment(event) {
     event.preventDefault(); setBusy(true); setError(''); setNotice('');
     try {
-      await api.post(`/table-sessions/${sessionId}/payments`, { method: payForm.method, amount: payForm.amount }, { headers: { 'Idempotency-Key': crypto.randomUUID() } });
+      const reference = payForm.reference?.trim() || null;
+      await api.post(`/table-sessions/${sessionId}/payments`, { method: payForm.method, amount: payForm.amount, ...(reference ? { reference } : {}) }, { headers: { 'Idempotency-Key': crypto.randomUUID() } });
       setPayForm(null); setNotice('Payment recorded.'); await refreshSession();
     } catch (err) { setError(err.response?.data?.error || 'The payment could not be recorded.'); }
     finally { setBusy(false); }
@@ -262,6 +294,14 @@ export default function PointOfSale() {
     </div>
     {error && <div className="notice notice-error">{error}</div>}
     {notice && <div className="notice notice-success"><Check size={14} /> {notice}</div>}
+    {!online && <div className="notice notice-error"><WifiOff size={14} /> You are offline. Draft your order — checkout stays disabled until the server confirms it.</div>}
+    <div className="pos-status-bar" role="status" aria-label="Terminal status">
+      <span className="pos-status-chip"><Store size={13} /> {businessName}</span>
+      <span className="pos-status-chip"><UserRound size={13} /> {user?.name || 'Signed in'} · {user?.role || ''}</span>
+      <span className={`pos-status-chip ${shift ? 'ok' : 'warn'}`}>{shift ? <UnlockKeyhole size={13} /> : <LockKeyhole size={13} />} {shift ? 'Shift open' : 'No open shift'}</span>
+      <span className={`pos-status-chip ${online ? 'ok' : 'bad'}`}>{online ? <Wifi size={13} /> : <WifiOff size={13} />} {online ? 'Online' : 'Offline'}</span>
+      <span className="pos-status-chip pos-clock"><Clock size={13} /> {now.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })} · {now.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</span>
+    </div>
 
     {mode === 'table' && !session && <section className="panel session-picker">
       <div className="panel-heading padded-heading"><div><span className="section-label">TABLE SERVICE</span><h2>Choose a table</h2></div><span className="result-count">{openSessions.length} open</span></div>
@@ -277,7 +317,7 @@ export default function PointOfSale() {
           <button type="button" className="session-pick-card free" key={table.id} disabled={busy || undefined} onClick={() => openTable(table.id)}>
             <div className="session-pick-head"><b>{table.code}</b><span className="table-status-pill status-available">Free</span></div>
             <small>{table.areaName || 'Floor'} · {table.capacity || 0} seats</small>
-            <span className="session-pick-open">{busy ? <Loader2 size={13} className="spin" /> : <>Open service</>}</span>
+            <span className="session-pick-open">{busy ? <LoaderCircle size={13} className="spin" /> : <>Open service</>}</span>
           </button>
         ))}
         {!floorTables.filter((t) => t.active).length && <div className="picker-empty">No tables configured. Ask a manager to set up the floor in Settings.</div>}
@@ -304,22 +344,34 @@ export default function PointOfSale() {
 
     <div className="pos-layout">
       <section className="panel product-picker">
-        <div className="picker-head"><div><span className="section-label">PRODUCT CATALOGUE</span><h2>{mode === 'table' && session ? `New round · Table ${session.tableCode}` : 'Choose items'}</h2></div><span className="result-count">{shown.length} products</span></div>
+        <div className="picker-head"><div><span className="section-label">PRODUCT CATALOGUE</span><h2>{mode === 'table' && session ? `New round · Table ${session.tableCode}` : 'Choose items'}</h2></div>
+          <div className="picker-head-actions">
+            <div className="picker-view-toggle" role="group" aria-label="Catalogue view">
+              <button type="button" className={pickerView === 'tiles' ? 'active' : ''} aria-pressed={pickerView === 'tiles'} onClick={() => setPickerView('tiles')} title="Tile view"><LayoutGrid size={14} /></button>
+              <button type="button" className={pickerView === 'list' ? 'active' : ''} aria-pressed={pickerView === 'list'} onClick={() => setPickerView('list')} title="List view"><List size={14} /></button>
+            </div>
+            <span className="result-count">{shown.length} products</span>
+          </div>
+        </div>
         <div className="search-box pos-search"><Search size={17} /><input value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={searchKeyDown} placeholder="Search by name or scan barcode" autoFocus aria-label="Search products by name or barcode" /></div>
         <div className="pos-scan-hint"><Barcode size={13} /> Press Enter to add an exact barcode match or a single result</div>
         {categories.length > 1 && <div className="pos-categories">
           <button type="button" className={`pos-category-chip ${!activeCategory ? 'active' : ''}`} onClick={() => setActiveCategory('')}>All drinks</button>
           {categories.map((category) => <button type="button" className={`pos-category-chip ${activeCategory === category ? 'active' : ''}`} key={category} onClick={() => setActiveCategory(activeCategory === category ? '' : category)}>{category}</button>)}
         </div>}
-        <div className="picker-grid">{shown.map((product) => {
-          const stock = Number(product.stockQuantity) || 0;
-          return <article className="picker-card product-card" key={product.id}>
+        {pickerView === 'tiles' ? <div className="picker-grid">{shown.map((product) => {
+          return <article className={`picker-card product-card ${stockState(product)}`} key={product.id}>
             <span className="picker-product-icon"><GlassWater size={17} /></span>
             <b>{product.name}</b>
             <small>{product.sku ? `SKU ${product.sku} · ` : ''}{product.stockQuantity} {product.baseUnit}s available</small>
-            <div className="unit-choice-list">{product.units.map((unit) => { const added = cart.find((item) => item.product.id === product.id && item.unit.id === unit.id)?.qty || 0; const inStock = stock >= (added + 1) * Number(unit.factorToBase); return <button type="button" className="unit-choice" key={unit.id} disabled={!inStock} onClick={() => add(product, unit)}><span>Add {unit.unitName}</span><b>{money(unit.sellingPrice)}</b></button>; })}</div>
+            <div className="unit-choice-list">{unitChoices(product)}</div>
           </article>;
-        })}{!shown.length && <div className="picker-empty">No products match this search.</div>}</div>
+        })}{!shown.length && <div className="picker-empty">No products match this search.</div>}</div> : <div className="picker-list">{shown.map((product) => {
+          return <div className={`picker-row ${stockState(product)}`} key={product.id}>
+            <div className="picker-row-copy"><b>{product.name}</b><small>{product.sku ? `SKU ${product.sku} · ` : ''}{product.stockQuantity} {product.baseUnit}s available</small></div>
+            <div className="unit-choice-list">{unitChoices(product)}</div>
+          </div>;
+        })}{!shown.length && <div className="picker-empty">No products match this search.</div>}</div>}
       </section>
 
       {mode === 'walkin' ? <form className="panel cart-panel" onSubmit={finish}>
@@ -355,11 +407,23 @@ export default function PointOfSale() {
           </div> : <div className="pos-discount-locked"><BadgePercent size={14} /><span>Discounts need owner or manager approval.</span></div>}
           <label>Customer<select value={customerId} onChange={(event) => setCustomerId(event.target.value)}><option value="">Walk-in customer</option>{customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label>
           <button type="button" className="text-link" onClick={() => setShowCustomer(true)}><UserRoundPlus size={14} /> Add customer</button>
-          <div className="pos-payment-lines">{payments.map((line, index) => <div className="pos-payment-line" key={index}>
-            <label>Amount applied<input type="number" min="0" step="0.01" value={line.autoFill ? defaultPayment : line.amount} onChange={(event) => setPayments((current) => current.map((item, i) => i === index ? { ...item, amount: event.target.value, autoFill: false } : item))} placeholder="Optional" /></label>
-            <label>Method<select value={line.method} onChange={(event) => setPayments((current) => current.map((item, i) => i === index ? { ...item, method: event.target.value } : item))}><option value="cash">Cash</option><option value="mobile_money">Mobile Money</option><option value="bank_transfer">Bank transfer</option><option value="card">Card</option></select></label>
-            <button type="button" className="icon-button" aria-label="Remove payment" onClick={() => setPayments((current) => current.filter((_, i) => i !== index))}><X size={14} /></button>
-          </div>)}</div>
+          <div className="pos-payment-lines">{payments.map((line, index) => {
+            const lineAmount = cents(line.autoFill ? defaultPayment : line.amount);
+            const change = line.method === 'cash' && line.tendered ? cents(line.tendered) - lineAmount : 0;
+            return <div className="pos-payment-line" key={index}>
+              <div className="pos-payment-row">
+                <label>Amount applied<input type="number" min="0" step="0.01" value={line.autoFill ? defaultPayment : line.amount} onChange={(event) => setPayments((current) => current.map((item, i) => i === index ? { ...item, amount: event.target.value, autoFill: false } : item))} placeholder="Optional" /></label>
+                <label>Method<select value={line.method} onChange={(event) => setPayments((current) => current.map((item, i) => i === index ? { ...item, method: event.target.value } : item))}><option value="cash">Cash</option><option value="mobile_money">Mobile Money</option><option value="bank_transfer">Bank transfer</option><option value="card">Card</option></select></label>
+                <button type="button" className="icon-button" aria-label="Remove payment" onClick={() => setPayments((current) => current.filter((_, i) => i !== index))}><X size={14} /></button>
+              </div>
+              {line.method === 'cash' ? <div className="pos-payment-extra">
+                <label>Cash tendered<input type="number" min="0" step="0.01" value={line.tendered || ''} onChange={(event) => setPayments((current) => current.map((item, i) => i === index ? { ...item, tendered: event.target.value } : item))} placeholder="Optional — for the change readout" aria-label="Cash tendered" /></label>
+                {change > 0 && <span className="pos-change"><Coins size={13} /> Change {money(change / 100)}</span>}
+              </div> : <div className="pos-payment-extra">
+                <label>Payment reference<input type="text" maxLength="120" value={line.reference || ''} onChange={(event) => setPayments((current) => current.map((item, i) => i === index ? { ...item, reference: event.target.value } : item))} placeholder="Transaction reference (optional)" aria-label="Payment reference" /></label>
+              </div>}
+            </div>;
+          })}</div>
           {payments.length < 4 && <button type="button" className="text-link" onClick={() => setPayments((current) => [...current, { method: 'mobile_money', amount: '', autoFill: false }])}><Plus size={14} /> Add split payment</button>}
           <div className="payment-balance"><span>Still due</span><b>{money(Math.max(0, total - applied) / 100)}</b></div>
           <div className="pos-hold-row">
@@ -367,7 +431,7 @@ export default function PointOfSale() {
             <button type="button" className="button button-outline button-small" disabled={!cart.length || busy} onClick={holdCart}><Pause size={14} /> Hold</button>
             <button type="button" className="text-link" onClick={loadHeld}>Resume held</button>
           </div>
-          <button className="button button-primary checkout-button" disabled={!cart.length || busy}>{busy ? 'Saving sale…' : `Complete sale · ${money(total / 100)}`}</button>
+          <button className="button button-primary checkout-button" disabled={!cart.length || busy || !online}>{busy ? 'Saving sale…' : `Complete sale · ${money(total / 100)}`}</button>
           <small className="checkout-note">Stock is reduced the moment the sale completes. Credit needs a customer.</small>
         </div>
       </form> : session && <form className="panel cart-panel" onSubmit={(event) => { event.preventDefault(); sendRound(true); }}>
@@ -389,7 +453,7 @@ export default function PointOfSale() {
         })}</div> : <div className="cart-empty"><div className="empty-icon"><UtensilsCrossed size={20} /></div><b>No items in this round</b><span>Serving deducts stock once — payment can come later.</span></div>}
         <div className="cart-checkout">
           <div className="pos-summary"><div className="cart-total"><span>This round</span><b>{money(subtotal / 100)}</b></div></div>
-          <button className="button button-primary checkout-button" disabled={!cart.length || busy} type="submit">{busy ? <Loader2 size={14} className="spin" /> : <>Serve round now · {money(subtotal / 100)}</>}</button>
+          <button className="button button-primary checkout-button" disabled={!cart.length || busy || !online} type="submit">{busy ? <LoaderCircle size={14} className="spin" /> : <>Serve round now · {money(subtotal / 100)}</>}</button>
           <button type="button" className="button button-outline" disabled={!cart.length || busy} onClick={() => sendRound(false)}><Pause size={14} /> Save as draft</button>
           <small className="checkout-note">Drafts keep stock untouched. Serving deducts stock exactly once, even if payment happens later.</small>
         </div>
@@ -416,7 +480,7 @@ export default function PointOfSale() {
           {session.payments.length > 0 && <div className="session-payments">
             <span className="section-label">PAYMENTS</span>
             {session.payments.map((payment) => <div className="session-payment" key={payment.id}>
-              <span><Banknote size={13} /> {payment.method.replace('_', ' ')}<small> · {payment.receivedByName || ''}</small></span><b>{money(payment.amount)}</b>
+              <span><Banknote size={13} /> {payment.method.replace('_', ' ')}<small>{payment.reference ? ` · Ref ${payment.reference}` : ''}{payment.receivedByName ? ` · ${payment.receivedByName}` : ''}</small></span><b>{money(payment.amount)}</b>
             </div>)}
           </div>}
           <div className="session-bill-summary">
@@ -425,7 +489,7 @@ export default function PointOfSale() {
             <div className="cart-total"><span>{sessionBalance > 0 ? 'Balance due' : 'Settled'}</span><b>{money(Math.max(0, sessionBalance))}</b></div>
           </div>
           <div className="session-bill-actions">
-            <button type="button" className="button button-outline" disabled={sessionBalance <= 0 || busy} onClick={() => setPayForm({ method: 'cash', amount: String(sessionBalance) })}><Banknote size={15} /> Take payment</button>
+            <button type="button" className="button button-outline" disabled={sessionBalance <= 0 || busy || !online} onClick={() => setPayForm({ method: 'cash', amount: String(sessionBalance) })}><Banknote size={15} /> Take payment</button>
           </div>
         </div>
       </form>}
@@ -448,8 +512,11 @@ export default function PointOfSale() {
         <div className="modal-title"><div><span className="section-label">TABLE BILL</span><h2>Take payment · Table {session?.tableCode}</h2></div><button type="button" className="icon-button" onClick={() => setPayForm(null)} aria-label="Close"><X size={18} /></button></div>
         <label>Amount (up to {money(sessionBalance)})<input required type="number" min="0" step="0.01" max={sessionBalance} value={payForm.amount} onChange={(event) => setPayForm({ ...payForm, amount: event.target.value })} /></label>
         <label>Method<select value={payForm.method} onChange={(event) => setPayForm({ ...payForm, method: event.target.value })}><option value="cash">Cash</option><option value="mobile_money">Mobile Money</option><option value="bank_transfer">Bank transfer</option><option value="card">Card</option></select></label>
-        <small className="modal-note">Cash needs an open cash session. Split bills by taking several payments.</small>
-        <div className="modal-actions"><button type="button" className="button button-quiet" onClick={() => setPayForm(null)}>Cancel</button><button className="button button-primary" disabled={busy}>{busy ? <Loader2 size={14} className="spin" /> : 'Record payment'}</button></div>
+        {payForm.method === 'cash' && <label>Cash tendered<input type="number" min="0" step="0.01" value={payForm.tendered || ''} onChange={(event) => setPayForm({ ...payForm, tendered: event.target.value })} placeholder="Optional — for the change readout" /></label>}
+        {payForm.method !== 'cash' && <label>Payment reference<input type="text" maxLength="120" value={payForm.reference || ''} onChange={(event) => setPayForm({ ...payForm, reference: event.target.value })} placeholder="Transaction reference (optional)" /></label>}
+        {payForm.method === 'cash' && cents(payForm.tendered) > cents(payForm.amount) && <div className="pos-change"><Coins size={14} /> Change {money((cents(payForm.tendered) - cents(payForm.amount)) / 100)}</div>}
+        <small className="modal-note">Cash needs an open cash session. Split bills by taking several payments. Only the amount applied is recorded — tendered cash is for the change readout.</small>
+        <div className="modal-actions"><button type="button" className="button button-quiet" onClick={() => setPayForm(null)}>Cancel</button><button className="button button-primary" disabled={busy || !online}>{busy ? <LoaderCircle size={14} className="spin" /> : 'Record payment'}</button></div>
       </form>
     </div>}
 
@@ -465,7 +532,7 @@ export default function PointOfSale() {
         {sessionBalance > 0 && <label>Credit customer (required for unpaid balance)<select value={closeForm.customerId} onChange={(event) => setCloseForm({ ...closeForm, customerId: event.target.value })} required={sessionBalance > 0}><option value="">Choose customer…</option>{customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label>}
         {sessionBalance > 0 && !canManage && <div className="notice notice-error">An unpaid balance needs a manager to transfer it to customer credit. Settle the bill first.</div>}
         <small className="modal-note">Closing creates the table sale receipt, frees the table and records exactly what was served.</small>
-        <div className="modal-actions"><button type="button" className="button button-quiet" onClick={() => setCloseForm(null)}>Keep table open</button><button className="button button-primary" disabled={busy || (sessionBalance > 0 && !closeForm.customerId)}>{busy ? <Loader2 size={14} className="spin" /> : 'Close table'}</button></div>
+        <div className="modal-actions"><button type="button" className="button button-quiet" onClick={() => setCloseForm(null)}>Keep table open</button><button className="button button-primary" disabled={busy || !online || (sessionBalance > 0 && !closeForm.customerId)}>{busy ? <LoaderCircle size={14} className="spin" /> : 'Close table'}</button></div>
       </form>
     </div>}
 
@@ -474,7 +541,7 @@ export default function PointOfSale() {
         <div className="modal-title"><div><span className="section-label">VOID ROUND</span><h2>Round {voidTarget.roundNo}</h2></div><button type="button" className="icon-button" onClick={() => setVoidTarget(null)} aria-label="Close"><X size={18} /></button></div>
         <p className="modal-copy">{voidTarget.state === 'served' ? 'Voiding a served round restores its stock and removes it from the bill. This is audited.' : 'Voiding a draft simply discards the unserved items.'}</p>
         <label>Reason<input required maxLength="500" value={voidTarget.reason} onChange={(event) => setVoidTarget({ ...voidTarget, reason: event.target.value })} placeholder="Wrong round, customer changed order…" /></label>
-        <div className="modal-actions"><button type="button" className="button button-quiet" onClick={() => setVoidTarget(null)}>Cancel</button><button className="button button-primary" disabled={busy || !voidTarget.reason}>{busy ? <Loader2 size={14} className="spin" /> : 'Void round'}</button></div>
+        <div className="modal-actions"><button type="button" className="button button-quiet" onClick={() => setVoidTarget(null)}>Cancel</button><button className="button button-primary" disabled={busy || !voidTarget.reason}>{busy ? <LoaderCircle size={14} className="spin" /> : 'Void round'}</button></div>
       </form>
     </div>}
 
@@ -483,7 +550,7 @@ export default function PointOfSale() {
         <div className="modal-title"><div><span className="section-label">MOVE TABLE</span><h2>Table {session.tableCode} moves to…</h2></div><button type="button" className="icon-button" onClick={() => setTransferForm(null)} aria-label="Close"><X size={18} /></button></div>
         <label>Target table<select required value={transferForm.targetTableId} onChange={(event) => setTransferForm({ ...transferForm, targetTableId: event.target.value })}><option value="">Choose a free table…</option>{floorTables.filter((table) => table.active && table.effectiveStatus === 'available').map((table) => <option key={table.id} value={table.id}>{table.code} · {table.areaName || 'Floor'}</option>)}</select></label>
         <label>Reason<input required maxLength="500" value={transferForm.reason} onChange={(event) => setTransferForm({ ...transferForm, reason: event.target.value })} placeholder="Customer moved to the terrace…" /></label>
-        <div className="modal-actions"><button type="button" className="button button-quiet" onClick={() => setTransferForm(null)}>Cancel</button><button className="button button-primary" disabled={busy || !transferForm.targetTableId}>{busy ? <Loader2 size={14} className="spin" /> : 'Move table'}</button></div>
+        <div className="modal-actions"><button type="button" className="button button-quiet" onClick={() => setTransferForm(null)}>Cancel</button><button className="button button-primary" disabled={busy || !transferForm.targetTableId}>{busy ? <LoaderCircle size={14} className="spin" /> : 'Move table'}</button></div>
       </form>
     </div>}
 

@@ -35,7 +35,7 @@ export default function ReceiptCard({ sale, businessName = 'Umucyobar' }) {
       {Number(sale.discountAmount) > 0 && <div className="receipt-payment receipt-discount-row"><span>Discount</span><span>−{money(sale.discountAmount)}</span></div>}
       <div className="receipt-sum"><span>Total</span><b>{money(sale.total)}</b></div>
       {(sale.payments || []).map((payment, index) => (
-        <div className="receipt-payment" key={index}><span>{payment.method.replace('_', ' ')}</span><span>{money(payment.amount)}</span></div>
+        <div className="receipt-payment" key={index}><span>{payment.method.replace('_', ' ')}{payment.reference ? ` · ${payment.reference}` : ''}</span><span>{money(payment.amount)}</span></div>
       ))}
       {Number(sale.balanceDue) > 0 && <div className="receipt-balance"><span>Balance due</span><b>{money(sale.balanceDue)}</b></div>}
       {Number(sale.refundedAmount) > 0 && <div className="receipt-payment"><span>Refunds paid</span><span>{money(sale.refundedAmount)}</span></div>}

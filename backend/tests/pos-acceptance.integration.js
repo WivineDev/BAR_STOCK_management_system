@@ -107,12 +107,13 @@ assert.equal(await stockOf(), 50, 'A refused discount sale must not touch stock'
 // ── 4, 5, 6, 8, 10. A complete sale: units, subtotals, total, split payment, stock ──
 // 3 bottles @ 1000 + 2 crates @ 12000 = 27 000; paid 5 000 cash + 22 000 mobile money.
 const saleKey = `pos-sale-${suffix}`;
+const mmReference = `MM-${suffix}-778812`;
 const saleResponse = await request('/sales', { method: 'POST', token: cashierToken, key: saleKey, body: {
   items: [
     { productId: product.id, unitId: bottleUnit.id, quantity: '3' },
     { productId: product.id, unitId: crateUnit.id, quantity: '2' },
   ],
-  payments: [ { method: 'cash', amount: '5000' }, { method: 'mobile_money', amount: '22000' } ],
+  payments: [ { method: 'cash', amount: '5000' }, { method: 'mobile_money', amount: '22000', reference: mmReference } ],
 } });
 assert.equal(saleResponse.status, 201, `Sale failed: ${saleResponse.data.error}`);
 const sale = saleResponse.data.sale;
@@ -155,6 +156,10 @@ const overpay = await request('/sales', { method: 'POST', token: cashierToken, k
   items: [{ productId: product.id, unitId: bottleUnit.id, quantity: '1' }], payments: [{ method: 'cash', amount: '5000' }],
 } });
 assert.equal(overpay.status, 400, 'Paying more than the total must be rejected');
+const badReference = await request('/sales', { method: 'POST', token: cashierToken, key: `pos-badref-${suffix}`, body: {
+  items: [{ productId: product.id, unitId: bottleUnit.id, quantity: '1' }], payments: [{ method: 'mobile_money', amount: '1000', reference: 12345 }],
+} });
+assert.equal(badReference.status, 400, 'Non-text payment references must be rejected (spec 3.2.7)');
 
 // ── 9. Printing or downloading receipts ────────────────────────────────
 const detail = await request(`/sales/${sale.id}`, { token: cashierToken });
@@ -170,6 +175,8 @@ assert.equal(Number(bottleLine.lineTotal), 3000, 'Receipt lines carry per-line s
 assert.equal(Number(crateLine.lineTotal), 24000, 'Crate lines are priced by the crate selling unit');
 assert.equal(receipt.payments.length, 2, 'Receipts show every payment method used');
 assert.ok(receipt.payments.some((payment) => payment.method === 'cash') && receipt.payments.some((payment) => payment.method === 'mobile_money'), 'Split payment methods appear on the receipt');
+assert.equal(receipt.payments.find((payment) => payment.method === 'mobile_money').reference, mmReference, 'Electronic payment references are captured at confirmation and returned for receipts (spec 3.2.7)');
+assert.equal(receipt.payments.find((payment) => payment.method === 'cash').reference, null, 'Cash payments record only the sale cash value, never tendered cash (spec 3.2.6)');
 assert.equal(Number(receipt.total), 27000, 'Receipts show the total bill');
 
 // 10 re-check: the rejected payments and the retried sale left stock intact.

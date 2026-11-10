@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Armchair, Check, Layers, Loader2, Package, PencilLine, Plus, Search, Settings as SettingsIcon, Trash2, X } from 'lucide-react';
+import { Armchair, Check, Layers, LoaderCircle, Package, PencilLine, Plus, Search, Settings as SettingsIcon, Trash2, X } from 'lucide-react';
 import api from '../services/api.js';
 import { useAuth } from '../state/AuthContext.jsx';
 
@@ -199,7 +199,7 @@ function UnitsSettings() {
           <label>Selling price (RWF)<input required type="number" min="0" step="0.01" value={unitForm.sellingPrice} onChange={(event) => setUnitForm({ ...unitForm, sellingPrice: event.target.value })} /></label>
           <label>Purchase cost (RWF)<input required type="number" min="0" step="0.01" value={unitForm.purchasePrice} onChange={(event) => setUnitForm({ ...unitForm, purchasePrice: event.target.value })} /></label>
         </div>
-        <div className="modal-actions"><button type="button" className="button button-quiet" onClick={() => setUnitForm(null)}>Cancel</button><button className="button button-primary" disabled={busy || !selected}>{busy ? <Loader2 size={14} className="spin" /> : 'Save unit'}</button></div>
+        <div className="modal-actions"><button type="button" className="button button-quiet" onClick={() => setUnitForm(null)}>Cancel</button><button className="button button-primary" disabled={busy || !selected}>{busy ? <LoaderCircle size={14} className="spin" /> : 'Save unit'}</button></div>
       </form>
     </div>}
   </>;
