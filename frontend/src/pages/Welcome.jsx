@@ -97,6 +97,21 @@ export default function Welcome() {
         </div>
       </section>
 
+      <section className="welcome-showcase" aria-label="The bars and rooms Umucyobar helps run">
+        <figure>
+          <img src="/images/bottle-bar.jpg" alt="Bottles lined up along a back-bar shelf" loading="lazy" decoding="async" />
+          <figcaption>Every bottle accounted for</figcaption>
+        </figure>
+        <figure>
+          <img src="/images/cocktails.jpg" alt="Cocktails finished on a busy service counter" loading="lazy" decoding="async" />
+          <figcaption>Service that keeps its rhythm</figcaption>
+        </figure>
+        <figure>
+          <img src="/images/dining-room.jpg" alt="A warm dining room set for evening service" loading="lazy" decoding="async" />
+          <figcaption>A room worth coming back to</figcaption>
+        </figure>
+      </section>
+
       <section className="welcome-cta">
         <div><span className="welcome-eyebrow"><span /> YOUR NEXT SHIFT STARTS HERE</span><h2>A calmer way to run the day.</h2><p>Sign in to your workspace and bring your business into focus.</p></div>
         <Link to="/login" className="welcome-primary">Enter your workspace <ArrowRight size={17} /></Link>
