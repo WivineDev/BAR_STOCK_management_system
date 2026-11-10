@@ -2,19 +2,23 @@ import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import {
   BarChart3,
-  Beer,
+  BookUser,
   Boxes,
   CircleDollarSign,
   FolderTree,
   LayoutDashboard,
   LayoutGrid,
   LogOut,
+  Martini,
   Menu,
+  Package,
+  PackagePlus,
   Receipt,
+  ReceiptText,
   Settings as SettingsIcon,
   ShoppingCart,
   Truck,
-  Users,
+  UserCog,
 } from 'lucide-react';
 import { useAuth } from '../state/AuthContext.jsx';
 
@@ -23,16 +27,16 @@ const navigation = [
   { to: '/pos', label: 'Point of sale', icon: ShoppingCart, roles: ['owner', 'manager', 'cashier'] },
   { to: '/floor', label: 'Floor & tables', icon: LayoutGrid, roles: ['owner', 'manager', 'cashier'] },
   { to: '/sales', label: 'Sales', icon: Receipt, roles: ['owner', 'manager', 'cashier', 'accountant'] },
-  { to: '/products', label: 'Products', icon: Beer, roles: ['owner', 'manager', 'storekeeper'] },
+  { to: '/products', label: 'Products', icon: Package, roles: ['owner', 'manager', 'storekeeper'] },
   { to: '/categories', label: 'Categories', icon: FolderTree, roles: ['owner', 'manager'] },
   { to: '/inventory', label: 'Inventory', icon: Boxes, roles: ['owner', 'manager', 'storekeeper'] },
-  { to: '/purchases', label: 'Purchases', icon: ShoppingCart, roles: ['owner', 'manager', 'storekeeper', 'accountant'] },
+  { to: '/purchases', label: 'Purchases', icon: PackagePlus, roles: ['owner', 'manager', 'storekeeper', 'accountant'] },
   { to: '/suppliers', label: 'Suppliers', icon: Truck, roles: ['owner', 'manager', 'accountant'] },
-  { to: '/customers', label: 'Customers & credit', icon: Users, roles: ['owner', 'manager', 'cashier', 'accountant'] },
+  { to: '/customers', label: 'Customers & credit', icon: BookUser, roles: ['owner', 'manager', 'cashier', 'accountant'] },
   { to: '/reports', label: 'Reports', icon: BarChart3, roles: ['owner', 'manager', 'accountant'] },
-  { to: '/expenses', label: 'Expenses', icon: Receipt, roles: ['owner', 'manager', 'accountant'] },
+  { to: '/expenses', label: 'Expenses', icon: ReceiptText, roles: ['owner', 'manager', 'accountant'] },
   { to: '/cash', label: 'Cash management', icon: CircleDollarSign, roles: ['owner', 'manager', 'cashier', 'accountant'] },
-  { to: '/users', label: 'Users', icon: Users, roles: ['owner'] },
+  { to: '/users', label: 'Users', icon: UserCog, roles: ['owner'] },
   { to: '/settings', label: 'Settings', icon: SettingsIcon, roles: ['owner', 'manager'] },
 ];
 
@@ -75,7 +79,7 @@ export default function Shell() {
     <div className="app-shell">
       <aside className={`sidebar ${open ? 'sidebar-open' : ''}`}>
         <div className="brand">
-          <div className="brand-mark"><Beer size={20} /></div>
+          <div className="brand-mark"><Martini size={20} /></div>
           <div><b>Umucyobar</b><small>STOCK &amp; SALES</small></div>
         </div>
         <div className="side-label">WORKSPACE</div>

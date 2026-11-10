@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowRight, BarChart3, Beer, Boxes, ShieldCheck, ShoppingCart, TrendingUp } from 'lucide-react';
+import { ArrowDown, ArrowRight, BarChart3, Boxes, Martini, ShieldCheck, ShoppingCart, TrendingUp } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 const features = [
@@ -12,7 +12,7 @@ export default function Welcome() {
     <main className="welcome-page">
       <header className="welcome-nav">
         <Link className="welcome-brand" to="/" aria-label="Umucyobar home">
-          <span className="welcome-brand-mark"><Beer size={21} /></span>
+          <span className="welcome-brand-mark"><Martini size={21} /></span>
           <span><b>Umucyobar</b><small>STOCK &amp; SALES</small></span>
         </Link>
         <nav className="welcome-nav-links" aria-label="Main navigation">
@@ -104,7 +104,7 @@ export default function Welcome() {
 
       <footer className="welcome-footer">
         <Link className="welcome-brand" to="/" aria-label="Umucyobar home">
-          <span className="welcome-brand-mark"><Beer size={18} /></span>
+          <span className="welcome-brand-mark"><Martini size={18} /></span>
           <span><b>Umucyobar</b><small>STOCK &amp; SALES</small></span>
         </Link>
         <span>Made for the people behind the bar. <b>Rwanda</b></span>

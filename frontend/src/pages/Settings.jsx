@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Armchair, Beer, Check, Layers, Loader2, PencilLine, Plus, Search, Settings as SettingsIcon, Trash2, X } from 'lucide-react';
+import { Armchair, Check, Layers, Loader2, Package, PencilLine, Plus, Search, Settings as SettingsIcon, Trash2, X } from 'lucide-react';
 import api from '../services/api.js';
 import { useAuth } from '../state/AuthContext.jsx';
 
@@ -165,7 +165,7 @@ function UnitsSettings() {
           {shown.map((product) => <button type="button" className={`settings-row selectable ${selected?.id === product.id ? 'selected' : ''}`} key={product.id} onClick={() => loadUnits(product)}>
             <div className="settings-row-copy"><b>{product.name}</b><small>{product.sku ? `SKU ${product.sku} · ` : ''}base: {product.baseUnit}</small></div>
           </button>)}
-          {!shown.length && <div className="settings-empty"><Beer size={19} /><b>No products match</b><span>Try another name or SKU.</span></div>}
+          {!shown.length && <div className="settings-empty"><Package size={19} /><b>No products match</b><span>Try another name or SKU.</span></div>}
         </div>
       </section>
       <section className="panel settings-panel">

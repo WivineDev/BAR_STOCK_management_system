@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  Armchair, BadgePercent, Banknote, Barcode, Beer, Check, Clock, CreditCard, Download, LayoutGrid, Loader2,
+  Armchair, BadgePercent, Banknote, Barcode, Check, Clock, CreditCard, Download, GlassWater, LayoutGrid, Loader2,
   Minus, Pause, Play, Plus, Printer, Search, ShoppingCart, Store, Trash2, UserRoundPlus, Users, UtensilsCrossed, X,
 } from 'lucide-react';
 import api from '../services/api.js';
@@ -314,7 +314,7 @@ export default function PointOfSale() {
         <div className="picker-grid">{shown.map((product) => {
           const stock = Number(product.stockQuantity) || 0;
           return <article className="picker-card product-card" key={product.id}>
-            <span className="picker-product-icon"><Beer size={17} /></span>
+            <span className="picker-product-icon"><GlassWater size={17} /></span>
             <b>{product.name}</b>
             <small>{product.sku ? `SKU ${product.sku} · ` : ''}{product.stockQuantity} {product.baseUnit}s available</small>
             <div className="unit-choice-list">{product.units.map((unit) => { const added = cart.find((item) => item.product.id === product.id && item.unit.id === unit.id)?.qty || 0; const inStock = stock >= (added + 1) * Number(unit.factorToBase); return <button type="button" className="unit-choice" key={unit.id} disabled={!inStock} onClick={() => add(product, unit)}><span>Add {unit.unitName}</span><b>{money(unit.sellingPrice)}</b></button>; })}</div>
@@ -328,7 +328,7 @@ export default function PointOfSale() {
           const lineTotal = Math.round(Number(item.unit.sellingPrice) * 100) * item.qty;
           const atMax = item.qty >= maxQtyFor(item);
           return <div className="cart-line" key={item.key}>
-            <div className="cart-line-icon"><Beer size={15} /></div>
+            <div className="cart-line-icon"><GlassWater size={15} /></div>
             <div className="cart-line-copy"><b>{item.product.name} · {item.unit.unitName}</b><small>{money(item.unit.sellingPrice)} each</small></div>
             <div className="quantity-control">
               <button type="button" onClick={() => changeQty(item.key, -1)} aria-label="Decrease quantity"><Minus size={13} /></button>
@@ -376,7 +376,7 @@ export default function PointOfSale() {
           const lineTotal = Math.round(Number(item.unit.sellingPrice) * 100) * item.qty;
           const atMax = item.qty >= maxQtyFor(item);
           return <div className="cart-line" key={item.key}>
-            <div className="cart-line-icon"><Beer size={15} /></div>
+            <div className="cart-line-icon"><GlassWater size={15} /></div>
             <div className="cart-line-copy"><b>{item.product.name} · {item.unit.unitName}</b><small>{money(item.unit.sellingPrice)} each</small></div>
             <div className="quantity-control">
               <button type="button" onClick={() => changeQty(item.key, -1)} aria-label="Decrease quantity"><Minus size={13} /></button>

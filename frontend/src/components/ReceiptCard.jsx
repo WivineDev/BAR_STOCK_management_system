@@ -1,4 +1,4 @@
-import { Beer } from 'lucide-react';
+import { Martini } from 'lucide-react';
 
 const money = (n) => new Intl.NumberFormat('en-RW', { style: 'currency', currency: 'RWF', maximumFractionDigits: 0 }).format(Number(n || 0));
 
@@ -7,7 +7,7 @@ export default function ReceiptCard({ sale, businessName = 'Umucyobar' }) {
   return (
     <div className="receipt-card">
       <div className="receipt-brand">
-        <div className="brand-mark"><Beer size={15} /></div>
+        <div className="brand-mark"><Martini size={15} /></div>
         <div><b>{businessName}</b><small>SALES RECEIPT</small></div>
       </div>
       <div className="receipt-meta">
