@@ -178,6 +178,34 @@ router.post('/products/:productId/units', authorize('owner', 'manager'), asyncRo
   res.status(201).json({ unit: result });
 }));
 
+router.patch('/products/:productId/units/:unitId', authorize('owner', 'manager'), asyncRoute(async (req, res) => {
+  const result = await withTransaction(async (connection) => {
+    const [units] = await connection.execute(
+      `SELECT pu.id, pu.unit_name AS unitName, pu.factor_to_base AS factorToBase, pu.selling_price AS sellingPrice, pu.purchase_price AS purchasePrice, pu.is_base AS isBase, pu.active, p.branch_id AS branchId
+       FROM product_units pu JOIN products p ON p.id = pu.product_id
+       WHERE pu.id = ? AND pu.business_id = ? AND pu.product_id = ? FOR UPDATE`,
+      [req.params.unitId, req.user.businessId, req.params.productId],
+    );
+    if (!units.length) fail(404, 'This product unit was not found');
+    const current = units[0];
+    const next = {
+      unitName: req.body?.unitName !== undefined ? normalizeLabel(req.body.unitName, 'Unit name', 40) : current.unitName,
+      factorToBase: req.body?.factorToBase !== undefined ? toQuantity(req.body.factorToBase, 'Base unit conversion') : current.factorToBase,
+      sellingPrice: req.body?.sellingPrice !== undefined ? moneyText(toMinor(req.body.sellingPrice, 'Selling price')) : current.sellingPrice,
+      purchasePrice: req.body?.purchasePrice !== undefined ? moneyText(toMinor(req.body.purchasePrice, 'Purchase price')) : current.purchasePrice,
+      active: req.body?.active !== undefined ? (req.body.active ? 1 : 0) : Number(current.active),
+    };
+    if (Number(current.isBase) === 1) {
+      if (next.unitName !== current.unitName || String(next.factorToBase) !== String(current.factorToBase)) fail(400, 'The base stock unit is fixed once transactions exist. Add a new unit for a different packing size.');
+      if (!next.active) fail(400, 'The base stock unit cannot be disabled');
+    }
+    await connection.execute('UPDATE product_units SET unit_name = ?, factor_to_base = ?, selling_price = ?, purchase_price = ?, active = ? WHERE id = ? AND business_id = ?', [next.unitName, next.factorToBase, next.sellingPrice, next.purchasePrice, next.active, req.params.unitId, req.user.businessId]);
+    await writeAudit(connection, { businessId: req.user.businessId, branchId: current.branchId, userId: req.user.id, action: 'updated', module: 'product_units', recordId: req.params.unitId, details: { productId: req.params.productId, before: { unitName: current.unitName, factorToBase: current.factorToBase, sellingPrice: current.sellingPrice, purchasePrice: current.purchasePrice }, after: next } });
+    return { id: req.params.unitId, ...next, isBase: current.isBase };
+  });
+  res.json({ unit: result });
+}));
+
 router.post('/inventory/:productId/adjustments', authorize('owner', 'manager', 'storekeeper'), asyncRoute(async (req, res) => {
   const quantity = toQuantity(req.body?.quantity, 'Adjustment quantity', true);
   const notes = normalizeLabel(req.body?.notes, 'Reason', 500);
@@ -468,9 +496,14 @@ router.post('/customers', authorize('owner', 'manager', 'cashier', 'accountant')
 router.get('/sales', asyncRoute(async (req, res) => {
   const [items] = await pool.execute(
     `SELECT s.id, s.reference, s.status, s.total, s.amount_paid AS amountPaid, s.balance_due AS balanceDue, s.created_at AS createdAt,
-      COALESCE(c.full_name, 'Walk-in customer') AS customerName, CASE WHEN s.balance_due > 0 THEN 'part-paid' ELSE 'paid' END AS paymentStatus,
+      s.sales_channel AS salesChannel, t.code AS tableCode, a.name AS areaName,
+      COALESCE(c.full_name, CASE WHEN s.sales_channel = 'TABLE' THEN CONCAT('Table ', t.code) ELSE 'Walk-in customer' END) AS customerName,
+      CASE WHEN s.balance_due > 0 THEN 'part-paid' ELSE 'paid' END AS paymentStatus,
       COALESCE(r.returnedTotal,0) AS returnedTotal
      FROM sales s LEFT JOIN customers c ON c.id = s.customer_id
+     LEFT JOIN table_sessions ts ON ts.id = s.table_session_id AND ts.business_id = s.business_id
+     LEFT JOIN bar_tables t ON t.id = ts.table_id
+     LEFT JOIN bar_areas a ON a.id = t.area_id
      LEFT JOIN (SELECT sale_id,SUM(total) AS returnedTotal FROM sales_returns WHERE business_id=? GROUP BY sale_id) r ON r.sale_id=s.id
      WHERE s.business_id = ? ORDER BY s.created_at DESC LIMIT 100`, [req.user.businessId, req.user.businessId],
   );
@@ -480,8 +513,13 @@ router.get('/sales', asyncRoute(async (req, res) => {
 router.get('/sales/:saleId', asyncRoute(async (req, res) => {
   const [sales] = await pool.execute(
     `SELECT s.id,s.reference,s.status,s.subtotal,s.discount_amount AS discountAmount,s.tax_amount AS taxAmount,s.total,
-      s.amount_paid AS amountPaid,s.balance_due AS balanceDue,s.created_at AS createdAt,COALESCE(c.full_name,'Walk-in customer') AS customerName,
+      s.amount_paid AS amountPaid,s.balance_due AS balanceDue,s.created_at AS createdAt,s.sales_channel AS salesChannel,
+      COALESCE(c.full_name,'Walk-in customer') AS customerName,
+      ts.id AS tableSessionId,t.code AS tableCode,t.name AS tableName,a.name AS areaName,
       u.name AS cashierName FROM sales s LEFT JOIN customers c ON c.id=s.customer_id AND c.business_id=s.business_id
+      LEFT JOIN table_sessions ts ON ts.id=s.table_session_id AND ts.business_id=s.business_id
+      LEFT JOIN bar_tables t ON t.id=ts.table_id
+      LEFT JOIN bar_areas a ON a.id=t.area_id
       JOIN users u ON u.id=s.cashier_id AND u.business_id=s.business_id WHERE s.id=? AND s.business_id=? LIMIT 1`, [req.params.saleId, req.user.businessId],
   );
   if (!sales.length) fail(404, 'Sale was not found');
@@ -602,16 +640,16 @@ router.post('/sales/:saleId/returns', authorize('owner', 'manager', 'accountant'
 router.post('/sales', authorize('owner', 'manager', 'cashier'), asyncRoute(async (req, res) => {
   const key = req.get('Idempotency-Key');
   if (typeof key !== 'string' || key.length < 8 || key.length > 120) fail(400, 'A unique Idempotency-Key is required for each sale');
-  const { items, payments = [], customerId = null } = req.body || {};
+  const { items, payments = [], customerId = null, discount = '0' } = req.body || {};
   if (!Array.isArray(items) || items.length < 1 || items.length > 100) fail(400, 'A sale must include 1 to 100 product lines');
   if (!Array.isArray(payments) || payments.length > 4) fail(400, 'A sale may have up to four payment lines');
   const sale = await withTransaction(async (connection) => {
-    const [existing] = await connection.execute('SELECT id, reference, total, amount_paid AS amountPaid, balance_due AS balanceDue FROM sales WHERE business_id = ? AND idempotency_key = ?', [req.user.businessId, key]);
+    const [existing] = await connection.execute('SELECT id, reference, subtotal, discount_amount AS discountAmount, total, amount_paid AS amountPaid, balance_due AS balanceDue FROM sales WHERE business_id = ? AND idempotency_key = ?', [req.user.businessId, key]);
     if (existing.length) return { ...existing[0], repeated: true };
     const [branchRows] = await connection.execute('SELECT branch_id AS branchId FROM users WHERE id = ? AND business_id = ?', [req.user.id, req.user.businessId]);
     const branchId = branchRows[0].branchId;
     const parsed = [];
-    let totalMinor = 0n; let totalCostMinor = 0n;
+    let subtotalMinor = 0n; let totalCostMinor = 0n;
     for (const line of items) {
       if (typeof line.productId !== 'string') fail(400, 'Every sale line needs a product');
       const quantity = toQuantity(line.quantity, 'Quantity');
@@ -630,9 +668,13 @@ router.post('/sales', authorize('owner', 'manager', 'cashier'), asyncRoute(async
       if (quantityToMilli(selected.stockQuantity) < baseQtyMilli) fail(409, `Not enough stock for ${selected.name}`);
       const lineTotal = multiplyMinorByQuantity(selected.sellingPrice, quantity);
       const lineCost = multiplyMinorByQuantity(selected.costPrice, baseQuantity);
-      totalMinor += lineTotal; totalCostMinor += lineCost;
+      subtotalMinor += lineTotal; totalCostMinor += lineCost;
       parsed.push({ ...selected, quantity, baseQuantity, lineTotal: moneyText(lineTotal), lineCost: moneyText(lineCost) });
     }
+    const discountMinor = toMinor(discount === null || discount === undefined || discount === '' ? '0' : discount, 'Discount');
+    if (discountMinor > 0n && !['owner', 'manager'].includes(req.user.role)) fail(403, 'Only an owner or manager can authorize a sale discount');
+    if (discountMinor > subtotalMinor) fail(400, 'Discount cannot exceed the sale subtotal');
+    const totalMinor = subtotalMinor - discountMinor;
     const paymentLines = payments.map((payment) => {
       if (!METHODS.includes(payment.method)) fail(400, 'Choose a supported payment method');
       const amount = toMinor(payment.amount, 'Payment amount');
@@ -650,9 +692,9 @@ router.post('/sales', authorize('owner', 'manager', 'cashier'), asyncRoute(async
     const [existingSession] = await connection.execute('SELECT id FROM cash_sessions WHERE business_id = ? AND user_id = ? AND status = \'open\' LIMIT 1 FOR UPDATE', [req.user.businessId, req.user.id]);
     if (paymentLines.some((item) => item.method === 'cash') && !existingSession.length) fail(409, 'Open a cash session before accepting cash payments');
     const [saleResult] = await connection.execute(
-      `INSERT INTO sales (id, business_id, branch_id, cashier_id, customer_id, reference, idempotency_key, subtotal, total, amount_paid, balance_due, cost_of_goods_sold)
-       VALUES (UUID(), ?, ?, ?, ?, CONCAT('S-', UPPER(SUBSTRING(REPLACE(UUID(), '-', ''), 1, 12))), ?, ?, ?, ?, ?, ?)`,
-      [req.user.businessId, branchId, req.user.id, customerId, key, moneyText(totalMinor), moneyText(totalMinor), moneyText(paidMinor), moneyText(balanceMinor), moneyText(totalCostMinor)],
+      `INSERT INTO sales (id, business_id, branch_id, cashier_id, customer_id, reference, idempotency_key, subtotal, discount_amount, tax_amount, total, amount_paid, balance_due, cost_of_goods_sold)
+       VALUES (UUID(), ?, ?, ?, ?, CONCAT('S-', UPPER(SUBSTRING(REPLACE(UUID(), '-', ''), 1, 12))), ?, ?, ?, 0, ?, ?, ?, ?)`,
+      [req.user.businessId, branchId, req.user.id, customerId, key, moneyText(subtotalMinor), moneyText(discountMinor), moneyText(totalMinor), moneyText(paidMinor), moneyText(balanceMinor), moneyText(totalCostMinor)],
     );
     const [idRows] = await connection.execute('SELECT id, reference FROM sales WHERE business_id = ? AND idempotency_key = ?', [req.user.businessId, key]);
     const saleId = idRows[0].id; const reference = idRows[0].reference;
@@ -673,8 +715,8 @@ router.post('/sales', authorize('owner', 'manager', 'cashier'), asyncRoute(async
       await connection.execute('INSERT INTO sale_payments (id, business_id, branch_id, sale_id, user_id, method, amount) VALUES (UUID(), ?, ?, ?, ?, ?, ?)', [req.user.businessId, branchId, saleId, req.user.id, payment.method, moneyText(payment.amount)]);
       if (payment.method === 'cash') await connection.execute('INSERT INTO cash_movements (id, business_id, branch_id, session_id, user_id, movement_type, direction, amount, reference_type, reference_id, notes) VALUES (UUID(), ?, ?, ?, ?, \'sale_payment\', \'in\', ?, \'sale\', ?, ?)', [req.user.businessId, branchId, existingSession[0].id, req.user.id, moneyText(payment.amount), saleId, reference]);
     }
-    await writeAudit(connection, { businessId: req.user.businessId, branchId, userId: req.user.id, action: 'completed', module: 'sales', recordId: saleId, reference, details: { total: moneyText(totalMinor), paid: moneyText(paidMinor), balance: moneyText(balanceMinor), lines: parsed.length } });
-    return { id: saleId, reference, total: moneyText(totalMinor), amountPaid: moneyText(paidMinor), balanceDue: moneyText(balanceMinor), repeated: false };
+    await writeAudit(connection, { businessId: req.user.businessId, branchId, userId: req.user.id, action: 'completed', module: 'sales', recordId: saleId, reference, details: { subtotal: moneyText(subtotalMinor), discount: moneyText(discountMinor), total: moneyText(totalMinor), paid: moneyText(paidMinor), balance: moneyText(balanceMinor), lines: parsed.length } });
+    return { id: saleId, reference, subtotal: moneyText(subtotalMinor), discountAmount: moneyText(discountMinor), total: moneyText(totalMinor), amountPaid: moneyText(paidMinor), balanceDue: moneyText(balanceMinor), repeated: false };
   });
   res.status(sale.repeated ? 200 : 201).json({ sale });
 }));

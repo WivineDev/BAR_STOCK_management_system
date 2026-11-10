@@ -15,6 +15,8 @@ import Sales from './pages/Sales.jsx';
 import Users from './pages/Users.jsx';
 import Reports from './pages/Reports.jsx';
 import Categories from './pages/Categories.jsx';
+import Floor from './pages/Floor.jsx';
+import Settings from './pages/Settings.jsx';
 import Welcome from './pages/Welcome.jsx';
 
 function Protected({ children }) { const { user, ready } = useAuth(); if (!ready) return <div className="loading-screen">Loading your workspace…</div>; return user ? children : <Navigate to="/welcome" replace />; }
@@ -27,6 +29,8 @@ export default function App() {
     <Route path="/" element={<Protected><Shell /></Protected>}>
       <Route index element={<Dashboard />} />
       <Route path="pos" element={<PointOfSale />} />
+      <Route path="floor" element={<Floor />} />
+      <Route path="settings" element={<Settings />} />
       <Route path="sales" element={<Sales />} />
       <Route path="products" element={<Products />} />
       <Route path="categories" element={<Categories />} />

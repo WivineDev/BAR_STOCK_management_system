@@ -11,9 +11,9 @@ export default function Welcome() {
   return (
     <main className="welcome-page">
       <header className="welcome-nav">
-        <Link className="welcome-brand" to="/" aria-label="Umucyo bar home">
+        <Link className="welcome-brand" to="/" aria-label="Umucyobar home">
           <span className="welcome-brand-mark"><Beer size={21} /></span>
-          <span><b>Umucyo bar</b><small>STOCK &amp; SALES</small></span>
+          <span><b>Umucyobar</b><small>STOCK &amp; SALES</small></span>
         </Link>
         <nav className="welcome-nav-links" aria-label="Main navigation">
           <a href="#features">What you can do</a>
@@ -25,7 +25,7 @@ export default function Welcome() {
         <div className="welcome-hero-copy">
           <div className="welcome-eyebrow"><span /> BUILT FOR THE BUSINESS YOU RUN EVERY DAY</div>
           <h1>Run your bar with <em>more clarity.</em></h1>
-          <p>Keep stock, sales, and cash in step. Umucyo bar brings the details of your day together, so you can spend less time chasing numbers and more time growing your business.</p>
+          <p>Keep stock, sales, and cash in step. Umucyobar brings the details of your day together, so you can spend less time chasing numbers and more time growing your business.</p>
           <div className="welcome-actions">
             <Link to="/login" className="welcome-primary">Get started <ArrowRight size={17} /></Link>
             <a href="#features" className="welcome-secondary">Explore the workspace <ArrowDown size={15} /></a>
@@ -37,7 +37,7 @@ export default function Welcome() {
           <section className="welcome-chart-card" aria-label="Static sample bar chart of weekly activity">
             <header className="welcome-chart-card-header">
               <span className="welcome-chart-card-icon"><BarChart3 size={17} /></span>
-              <span className="welcome-chart-card-title"><small>UMUCYO BAR · BUSINESS OVERVIEW</small><b>Weekly activity</b></span>
+              <span className="welcome-chart-card-title"><small>UMUCYOBAR · BUSINESS OVERVIEW</small><b>Weekly activity</b></span>
               <span className="welcome-chart-card-sample"><i /> STATIC GRAPH</span>
             </header>
             <div className="welcome-chart-plot" role="img" aria-label="Static grouped bar chart comparing activity this week and last week, by day.">
@@ -103,12 +103,12 @@ export default function Welcome() {
       </section>
 
       <footer className="welcome-footer">
-        <Link className="welcome-brand" to="/" aria-label="Umucyo bar home">
+        <Link className="welcome-brand" to="/" aria-label="Umucyobar home">
           <span className="welcome-brand-mark"><Beer size={18} /></span>
-          <span><b>Umucyo bar</b><small>STOCK &amp; SALES</small></span>
+          <span><b>Umucyobar</b><small>STOCK &amp; SALES</small></span>
         </Link>
         <span>Made for the people behind the bar. <b>Rwanda</b></span>
-        <span>© {new Date().getFullYear()} Umucyo bar</span>
+        <span>© {new Date().getFullYear()} Umucyobar</span>
       </footer>
     </main>
   );

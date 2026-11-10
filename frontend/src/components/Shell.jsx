@@ -7,9 +7,11 @@ import {
   CircleDollarSign,
   FolderTree,
   LayoutDashboard,
+  LayoutGrid,
   LogOut,
   Menu,
   Receipt,
+  Settings as SettingsIcon,
   ShoppingCart,
   Truck,
   Users,
@@ -19,6 +21,7 @@ import { useAuth } from '../state/AuthContext.jsx';
 const navigation = [
   { to: '/', label: 'Overview', icon: LayoutDashboard, end: true },
   { to: '/pos', label: 'Point of sale', icon: ShoppingCart, roles: ['owner', 'manager', 'cashier'] },
+  { to: '/floor', label: 'Floor & tables', icon: LayoutGrid, roles: ['owner', 'manager', 'cashier'] },
   { to: '/sales', label: 'Sales', icon: Receipt, roles: ['owner', 'manager', 'cashier', 'accountant'] },
   { to: '/products', label: 'Products', icon: Beer, roles: ['owner', 'manager', 'storekeeper'] },
   { to: '/categories', label: 'Categories', icon: FolderTree, roles: ['owner', 'manager'] },
@@ -30,11 +33,14 @@ const navigation = [
   { to: '/expenses', label: 'Expenses', icon: Receipt, roles: ['owner', 'manager', 'accountant'] },
   { to: '/cash', label: 'Cash management', icon: CircleDollarSign, roles: ['owner', 'manager', 'cashier', 'accountant'] },
   { to: '/users', label: 'Users', icon: Users, roles: ['owner'] },
+  { to: '/settings', label: 'Settings', icon: SettingsIcon, roles: ['owner', 'manager'] },
 ];
 
 const titles = {
   '/': 'Overview',
   '/pos': 'Point of sale',
+  '/floor': 'Floor & tables',
+  '/settings': 'Settings',
   '/sales': 'Sales',
   '/products': 'Products',
   '/categories': 'Categories',
@@ -70,7 +76,7 @@ export default function Shell() {
       <aside className={`sidebar ${open ? 'sidebar-open' : ''}`}>
         <div className="brand">
           <div className="brand-mark"><Beer size={20} /></div>
-          <div><b>Umucyo bar</b><small>STOCK &amp; SALES</small></div>
+          <div><b>Umucyobar</b><small>STOCK &amp; SALES</small></div>
         </div>
         <div className="side-label">WORKSPACE</div>
         <nav id="primary-navigation">
@@ -117,7 +123,7 @@ export default function Shell() {
           </button>
           <div className="crumb">Workspace <span>/</span> <b>{titles[location.pathname] || 'Overview'}</b></div>
           <div className="top-actions">
-            <div className="business-chip"><span className="status-pip" /> {user?.businessName || 'Umucyo bar'}</div>
+            <div className="business-chip"><span className="status-pip" /> {user?.businessName || 'Umucyobar'}</div>
             <div className="avatar avatar-small" aria-label={`Signed in as ${user?.name || 'owner'}`}>{initials}</div>
             <button className="button button-quiet logout-action" onClick={logout} title="Sign out of your account">
               <LogOut size={15} />

@@ -4,6 +4,8 @@ Automated tests verify exact money parsing, rejected precision, line totals, bas
 
 The optional API integration smoke test exercises a full workflow against the API and a fresh isolated database. Start the API and run `npm run test:integration -w backend`; it bootstraps an owner, so run it only against an empty development database. It creates test business records and must not target a live or shared database.
 
+The table-service integration suite runs fully isolated: `npm run test:tables -w backend` creates a throwaway MySQL database (`bssbms_tables_<random>`), applies all migrations, boots a dedicated server on port 5199, runs the spec v2.1 §7A.6/§16 table-service assertions, then drops the database. It bootstraps its own owner, so it is safe to run at any time and never touches the development database. It covers anonymous table open, drafts not touching stock, stock deducted exactly once on serve, idempotent serve/order/payment/close, concurrent open attempts yielding exactly one winner, split payments with an overpay guard, close freeing the table without re-deducting stock, insufficient-stock rejection, draft and served voids with stock restoration, transfer and merge with preserved history, walk-in sales unaffected, credit close flowing into customer debt separately from tabs, held carts with no movement, and table reports.
+
 Once XAMPP MySQL is running and migrations have been applied, manually exercise:
 
 - Create the owner, add a product, record opening stock, then complete a sale and confirm stock, payment, debt, and audit rows commit together.

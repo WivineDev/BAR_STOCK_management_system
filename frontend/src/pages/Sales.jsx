@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowUpRight, Printer, RotateCcw, Search, X } from 'lucide-react';
+import { ArrowUpRight, Download, Printer, RotateCcw, Search, X } from 'lucide-react';
 import api from '../services/api.js';
 import { useAuth } from '../state/AuthContext.jsx';
+import ReceiptCard from '../components/ReceiptCard.jsx';
+import { downloadReceipt } from '../utils/receipt.js';
 
 const money = (n) => new Intl.NumberFormat('en-RW', { style: 'currency', currency: 'RWF', maximumFractionDigits: 0 }).format(Number(n || 0));
 const cents = (value) => { const [whole, decimal = ''] = String(value ?? '0').split('.'); return BigInt(whole || '0') * 100n + BigInt(decimal.padEnd(2, '0').slice(0, 2)); };
@@ -57,16 +59,7 @@ export default function Sales() {
     <div className="panel table-panel"><div className="table-scroll"><table><thead><tr><th>REFERENCE</th><th>DATE</th><th>CUSTOMER</th><th>ORIGINAL</th><th>RETURNED</th><th>PAID</th><th>BALANCE</th><th>STATUS</th><th></th></tr></thead><tbody>{filtered.map((item) => <tr key={item.id}><td><b>{item.reference}</b></td><td>{new Date(item.createdAt).toLocaleString()}</td><td>{item.customerName}</td><td className="table-money">{money(item.total)}</td><td>{money(item.returnedTotal)}</td><td>{money(item.amountPaid)}</td><td>{money(item.balanceDue)}</td><td>{item.status?.replace('_', ' ') || item.paymentStatus}</td><td><button className="button button-small button-outline" onClick={() => openReceipt(item.id)}>Details <ArrowUpRight size={13} /></button></td></tr>)}</tbody></table>{!filtered.length && <div className="table-empty"><b>No matching sales</b><span>Completed transactions will appear here.</span></div>}</div></div>
     {sale && <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setSale(null)}><div className="modal receipt-modal return-modal">
       <div className="modal-title no-print"><div><span className="section-label">SALE RECORD</span><h2>{sale.reference}</h2></div><button className="icon-button" onClick={() => setSale(null)} aria-label="Close"><X size={18} /></button></div>
-      <div className="receipt-card"><div className="receipt-brand"><div className="brand-mark"><span>✦</span></div><div><b>Umucyo bar</b><small>SALES RECEIPT</small></div></div>
-        <div className="receipt-meta"><span>{sale.reference}</span><span>{new Date(sale.createdAt).toLocaleString()}</span><span>Served by {sale.cashierName}</span><span>Customer: {sale.customerName}</span><span>Status: {sale.status?.replace('_', ' ')}</span></div><div className="receipt-divider" />
-        <div className="receipt-lines">{sale.items.map((line) => <div className="receipt-line" key={line.id}><div><b>{line.productName}</b><small>{line.quantity} × {line.unit}{Number(line.returnedQuantity) > 0 ? ` · ${line.returnedQuantity} returned` : ''}</small></div><b>{money(line.lineTotal)}</b></div>)}</div>
-        <div className="receipt-divider" /><div className="receipt-sum"><span>Original total</span><b>{money(sale.total)}</b></div>
-        {sale.payments.map((payment, index) => <div className="receipt-payment" key={index}><span>{payment.method.replace('_', ' ')}</span><span>{money(payment.amount)}</span></div>)}
-        {Number(sale.balanceDue) > 0 && <div className="receipt-balance"><span>Balance due</span><b>{money(sale.balanceDue)}</b></div>}
-        {Number(sale.refundedAmount) > 0 && <div className="receipt-payment"><span>Refunds paid</span><span>{money(sale.refundedAmount)}</span></div>}
-        {sale.returns?.map((item) => <div className="receipt-payment" key={item.id}><span>{item.reference} · {new Date(item.createdAt).toLocaleDateString()}</span><span>{money(item.total)} returned</span></div>)}
-        <div className="receipt-thanks">Thank you for your business.</div>
-      </div>
+      <ReceiptCard sale={sale} businessName={user?.businessName || 'Umucyobar'} />
       {returnMode && canReturn(user) && <form className="return-form no-print" onSubmit={submitReturn}>
         <div className="purchase-form-heading"><div><span className="section-label">AUTHORIZED SALES RETURN</span><h2>Record returned items</h2></div><RotateCcw size={18} /></div>
         <div className="table-scroll"><table><thead><tr><th>ITEM</th><th>REMAINING</th><th>RETURN QTY</th><th>RESTOCK?</th><th>VALUE</th></tr></thead><tbody>{sale.items.map((line) => {
@@ -79,7 +72,7 @@ export default function Sales() {
         {selectedLines.some((line) => typeof line.restock !== 'boolean') && <div className="notice notice-error">Choose whether each returned item can be put back into saleable stock.</div>}
         <div className="modal-actions"><button className="button button-quiet" type="button" onClick={() => setReturnMode(false)}>Cancel</button><button className="button button-primary" disabled={returnBusy || !selectedLines.length || selectedLines.some((line) => typeof line.restock !== 'boolean')}>{returnBusy ? 'Recording…' : 'Record return'}</button></div>
       </form>}
-      <div className="modal-actions no-print">{canReturn(user) && !returnMode && sale.status !== 'returned' && sale.status !== 'voided' && <button className="button button-outline" onClick={() => { setReturnQuantities({}); setRestock({}); setReturnMode(true); }}><RotateCcw size={15} /> Start return</button>}<button className="button button-quiet" onClick={() => setSale(null)}>Close</button><button className="button button-primary" onClick={() => window.print()}><Printer size={15} /> Print receipt</button></div>
+      <div className="modal-actions no-print">{canReturn(user) && !returnMode && sale.status !== 'returned' && sale.status !== 'voided' && <button className="button button-outline" onClick={() => { setReturnQuantities({}); setRestock({}); setReturnMode(true); }}><RotateCcw size={15} /> Start return</button>}<button className="button button-quiet" onClick={() => setSale(null)}>Close</button><button className="button button-outline" onClick={() => downloadReceipt(sale, user?.businessName || 'Umucyobar')}><Download size={15} /> Download</button><button className="button button-primary" onClick={() => window.print()}><Printer size={15} /> Print receipt</button></div>
     </div></div>}
   </div>;
 }

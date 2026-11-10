@@ -10,7 +10,8 @@
     "db:generate": "prisma generate",
     "db:validate": "prisma validate",
     "test": "node --test",
-    "test:integration": "node tests/workflows.integration.js"
+    "test:integration": "node tests/workflows.integration.js",
+    "test:tables": "node tests/run-table-service.mjs"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",

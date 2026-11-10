@@ -26,6 +26,14 @@
 
 **Verification:** integration covers category create/archive, product assignment/editing, category report aggregation, and product creation with a zero threshold.
 
+## Phase 4: table service (spec v2.1 §7A)
+
+**Completed:** added migration `0005_table_service.sql` — floor areas, numbered tables, table sessions, order rounds with items, table-session payments, held carts, and new movement/enum types; `sales` gained `table_session_id` and `sales_channel`. Built the floor-service API (`backend/src/routes/floor.js`): area/table configuration, anonymous table open (one open session per table enforced by the database), draft and served rounds, idempotent serve that deducts stock exactly once, void with stock restoration for served rounds, split payments with overpay guard, idempotent close that copies the bill into a `TABLE`-channel sale, waiter assignment, table transfer and merge with preserved history, held carts, and a table report endpoint. Editing packaging conversions after creation (`PATCH /products/:id/units/:unitId`) is supported; the base unit remains immutable and snapshots keep historical lines stable.
+
+**Frontend:** a Floor page (occupancy dashboard, live bills), a dual-channel Point of Sale (walk-in checkout and table service), Settings tabs for floor & seating and product-unit conversions, table context on receipts and the sales list, and a table-service section in Reports (open tabs, sales by table/area, waiter performance, turnover) for owners/managers/accountants.
+
+**Verification:** an isolated-database integration suite (`npm run test:tables`) creates a throwaway MySQL database, boots a dedicated server, runs the full spec §7A.6 and §16 checks, and drops the database afterwards. It covers anonymous open, drafts leaving stock untouched, stock deducted exactly once at serving, serve/order/payment/close idempotency, one open session per table under concurrent opens, split payments with an overpay guard, close freeing the table without re-deducting stock, insufficient-stock rejection, draft and served voids, merge/transfer with preserved history and renumbered rounds, walk-in sales unaffected, credit close flowing into the customer account and staying separate from tabs, held carts with no movement, and table reports. An additional 79-check end-to-end run passed against the local development database. Vite production build succeeds.
+
 ## Outstanding before commercial use
 
 - Customer/supplier statements and transaction history screens.
@@ -35,14 +43,15 @@
 - Scheduled backups, retention, and tested restore procedures.
 - Production configuration, security review, monitoring, and verified deployment.
 - Concurrency, database failure/recovery, cross-tenant isolation, and backup restore testing.
-- Cash tender/change and tax/discount calculations.
+- Cash tender/change and tax calculations. Authorized discount capture is available at the point of sale (owner/manager only).
 - Return UI currently supports one settlement method per return; supplier overpayments require an immediate refund instead of a carry-forward credit.
+- Table-service scope not yet built: batch/expiry tracking, stock counts, price history, reservations, offline sync, multi-branch floors, and kitchen-display integrations. Deactivated QA tables/areas from verification runs remain in the local development database as inactive rows.
 
 Do not treat this build as a complete commercial release or as the only ledger for a live business.
 
 ## Local database and repository state
 
-The ignored local `backend/.env` points to the fresh `bssbms_app_20261105_484744` database. The pre-existing populated `bssbms` database has a different legacy schema; it was left untouched, and the migration runner refuses to apply this app's migrations to an unmarked existing database. The app database remains available for first-owner setup.
+The ignored local `backend/.env` points to the fresh `bssbms_app_20261105_484744` database with all five migrations applied. The pre-existing populated `bssbms` database has a different legacy schema; it was left untouched, and the migration runner refuses to apply this app's migrations to an unmarked existing database.
 
 The workspace has a local `main` branch and no configured Git remote, GitHub branches, pull request, or production deployment.
 
