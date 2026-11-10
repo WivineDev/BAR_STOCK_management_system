@@ -15,7 +15,7 @@ const returnValue = (line, quantity) => {
   const calculated = portion(cents(line.lineTotal), part, purchased);
   return calculated > remainingValue ? remainingValue : calculated;
 };
-const newLine = () => ({ productId: '', unitId: '', quantity: '1', unitCost: '', units: [] });
+const newLine = () => ({ productId: '', unitId: '', quantity: '1', unitCost: '', sellingPrice: '', units: [] });
 const canReturn = (user) => ['owner', 'manager', 'storekeeper', 'accountant'].includes(user?.role);
 
 export default function Purchases() {
@@ -36,12 +36,18 @@ export default function Purchases() {
     if (!row) { next[index] = newLine(); setLines(next); return; }
     try {
       const { data } = await api.get(`/products/${productId}/units`);
+      if (!data.items.length) {
+        next[index] = { ...next[index], productId, unitId: '', units: [], unitCost: '', sellingPrice: '' };
+        setLines(next);
+        setError('This product has no active packaging unit. Re-run the sample-data seed to repair demo products.');
+        return;
+      }
       const base = data.items.find((unit) => Number(unit.isBase) === 1) || data.items[0];
-      next[index] = { ...next[index], productId, units: data.items, unitId: base?.id || '', unitCost: base?.purchasePrice || row.costPrice }; setLines(next);
+      next[index] = { ...next[index], productId, units: data.items, unitId: base?.id || '', unitCost: base?.purchasePrice || row.costPrice, sellingPrice: base?.sellingPrice ?? '' }; setLines(next); setError('');
     } catch (err) { setError(err.response?.data?.error || 'Packaging units could not be loaded.'); }
   }
   function updateLine(index, field, value) { setLines((current) => current.map((line, i) => i === index ? { ...line, [field]: value } : line)); }
-  function chooseUnit(index, unitId) { const unit = lines[index].units.find((item) => item.id === unitId); setLines((current) => current.map((item, i) => i === index ? { ...item, unitId, unitCost: unit?.purchasePrice || '' } : item)); }
+  function chooseUnit(index, unitId) { const unit = lines[index].units.find((item) => item.id === unitId); setLines((current) => current.map((item, i) => i === index ? { ...item, unitId, unitCost: unit?.purchasePrice || '', sellingPrice: unit?.sellingPrice ?? '' } : item)); }
   const estimatedTotal = lines.reduce((sum, line) => sum + Math.round(Number(line.unitCost || 0) * 100) * Number(line.quantity || 0), 0) / 100;
   useEffect(() => {
     if (!paymentEdited) setPayment(estimatedTotal > 0 ? estimatedTotal.toFixed(2) : '');
@@ -51,9 +57,11 @@ export default function Purchases() {
   const payable = cents(purchase?.balanceDue || '0'); const payableCredit = returnTotal < payable ? returnTotal : payable; const supplierRefund = returnTotal - payableCredit;
 
   async function receive(event) {
-    event.preventDefault(); setBusy(true); setError(''); setNotice('');
+    event.preventDefault();
+    if (lines.some((line) => line.productId && !line.unitId)) { setError('Every selected product needs an active packaging unit before receiving stock.'); return; }
+    setBusy(true); setError(''); setNotice('');
     try {
-      const validLines = lines.filter((line) => line.productId).map(({ productId, unitId, quantity, unitCost }) => ({ productId, unitId, quantity, unitCost }));
+      const validLines = lines.filter((line) => line.productId).map(({ productId, unitId, quantity, unitCost, sellingPrice }) => ({ productId, unitId, quantity, unitCost, sellingPrice }));
       const { data } = await api.post('/purchases', { supplierId, items: validLines, payments: payment ? [{ method, amount: payment }] : [] });
       setNotice(`Purchase ${data.purchase.reference} received · ${money(data.purchase.total)}`); setLines([newLine()]); setSupplierId(''); setPayment(''); setPaymentEdited(false); await load();
     } catch (err) { setError(err.response?.data?.error || 'Purchase could not be received.'); }
@@ -81,7 +89,7 @@ export default function Purchases() {
     {error && <div className="notice notice-error">{error}</div>}{notice && <div className="notice notice-success">{notice}</div>}
     <form className="panel purchase-form" onSubmit={receive}><div className="purchase-form-heading"><div><span className="section-label">NEW DELIVERY</span><h2>Receive stock</h2></div><PackagePlus size={18} /></div>
       {!suppliers.length ? <div className="notice notice-error">Add a supplier before recording a purchase. <a href="/suppliers">Open suppliers</a></div> : <label>Supplier<select required value={supplierId} onChange={(event) => setSupplierId(event.target.value)}><option value="">Select supplier</option>{suppliers.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.name}</option>)}</select></label>}
-      <div className="purchase-lines">{lines.map((line, index) => <div className="purchase-line" key={index}><label>Product<select required value={line.productId} onChange={(event) => chooseProduct(index, event.target.value)}><option value="">Choose product</option>{products.map((product) => <option key={product.id} value={product.id}>{product.name} · {product.stockQuantity} {product.baseUnit}s</option>)}</select></label><label>Packaging unit<select required value={line.unitId} onChange={(event) => chooseUnit(index, event.target.value)} disabled={!line.units.length}><option value="">Select unit</option>{line.units.map((unit) => <option key={unit.id} value={unit.id}>{unit.unitName} · {unit.factorToBase} base units</option>)}</select></label><label>Quantity<input type="number" min="0.001" step="0.001" required value={line.quantity} onChange={(event) => updateLine(index, 'quantity', event.target.value)} /></label><label>Unit cost (RWF)<input type="number" min="0" step="0.01" required value={line.unitCost} onChange={(event) => updateLine(index, 'unitCost', event.target.value)} /></label><button type="button" className="icon-button purchase-remove" aria-label="Remove line" disabled={lines.length === 1} onClick={() => setLines((current) => current.filter((_, i) => i !== index))}><X size={16} /></button></div>)}</div>
+      <div className="purchase-lines">{lines.map((line, index) => <div className="purchase-line" key={index}><label>Product<select required value={line.productId} onChange={(event) => chooseProduct(index, event.target.value)}><option value="">Choose product</option>{products.map((product) => <option key={product.id} value={product.id}>{product.name} · {product.stockQuantity} {product.baseUnit}s</option>)}</select></label><label>Packaging unit<select required value={line.unitId} onChange={(event) => chooseUnit(index, event.target.value)} disabled={!line.units.length}><option value="">Select unit</option>{line.units.map((unit) => <option key={unit.id} value={unit.id}>{unit.unitName} · {unit.factorToBase} base units</option>)}</select></label><label>Quantity<input type="number" min="0.001" step="0.001" required value={line.quantity} onChange={(event) => updateLine(index, 'quantity', event.target.value)} /></label><label>Unit cost (RWF)<input type="number" min="0" step="0.01" required value={line.unitCost} onChange={(event) => updateLine(index, 'unitCost', event.target.value)} /></label><label>Selling price (RWF)<input type="number" min="0" step="0.01" required value={line.sellingPrice} onChange={(event) => updateLine(index, 'sellingPrice', event.target.value)} /></label><button type="button" className="icon-button purchase-remove" aria-label="Remove line" disabled={lines.length === 1} onClick={() => setLines((current) => current.filter((_, i) => i !== index))}><X size={16} /></button></div>)}</div>
       <button className="text-link" type="button" onClick={() => setLines((current) => [...current, newLine()])}><Plus size={14} /> Add product line</button>
       <div className="purchase-footer"><div className="purchase-payment"><label>Amount paid now (RWF)<input type="number" min="0" step="0.01" value={payment} onChange={(event) => { setPayment(event.target.value); setPaymentEdited(true); }} placeholder="Leave blank to record supplier debt" /></label><label>Payment method<select value={method} onChange={(event) => setMethod(event.target.value)}><option value="cash">Cash</option><option value="mobile_money">Mobile Money</option><option value="bank_transfer">Bank transfer</option><option value="card">Card</option></select></label></div><div className="purchase-total"><span>Estimated total</span><b>{money(estimatedTotal)}</b><small>Amount paid fills from the purchase total; edit it for a partial payment or leave blank for supplier debt. Stock is received as soon as this purchase commits.</small><button className="button button-primary" disabled={busy || loading || !suppliers.length || !products.length}>{busy ? 'Receiving…' : 'Confirm purchase'}</button></div></div>
     </form>

@@ -7,6 +7,7 @@
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
     "migrate": "node database/migrate.js",
+    "db:seed": "node database/seeds/sample-data.js",
     "db:generate": "prisma generate",
     "db:validate": "prisma validate",
     "test": "node --test",

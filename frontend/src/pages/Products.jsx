@@ -5,21 +5,21 @@ import { useAuth } from '../state/AuthContext.jsx';
 import { productImage, PRODUCT_IMAGE_CHOICES } from '../utils/productImage.js';
 
 const currency = (n) => new Intl.NumberFormat('en-RW', { style: 'currency', currency: 'RWF', maximumFractionDigits: 0 }).format(Number(n || 0));
-const emptyProduct = () => ({ name: '', sku: '', imageKey: '', categoryId: '', baseUnit: 'bottle', sellingPrice: '', costPrice: '', lowStockThreshold: '0' });
+const emptyProduct = () => ({ name: '', sku: '', imageKey: '', categoryId: '', baseUnit: 'bottle', lowStockThreshold: '0' });
 const emptyUnit = () => ({ unitName: '', factorToBase: '', sellingPrice: '', purchasePrice: '' });
 const canManage = (user) => ['owner', 'manager'].includes(user?.role);
 
 export default function Products() {
   const { user } = useAuth();
-  const [items, setItems] = useState([]); const [categories, setCategories] = useState([]); const [search, setSearch] = useState(''); const [show, setShow] = useState(false); const [error, setError] = useState('');
+  const [items, setItems] = useState([]); const [categories, setCategories] = useState([]); const [search, setSearch] = useState(''); const [page, setPage] = useState(1); const [limit, setLimit] = useState(10); const [meta, setMeta] = useState({ page: 1, limit: 10, totalRecords: 0, totalPages: 0 }); const [show, setShow] = useState(false); const [error, setError] = useState('');
   const [form, setForm] = useState(emptyProduct()); const [editingProduct, setEditingProduct] = useState(null); const [unitTarget, setUnitTarget] = useState(null); const [units, setUnits] = useState([]); const [unitForm, setUnitForm] = useState(emptyUnit());
-  async function load() { try { const { data } = await api.get('/products', { params: { search } }); setItems(data.items); setError(''); } catch { setError('Products could not be loaded.'); } }
-  useEffect(() => { load(); }, [search]);
+  async function load(nextPage = page, nextSearch = search) { try { const { data } = await api.get('/products', { params: { search: nextSearch, page: nextPage, limit, sortBy: 'createdAt', sortOrder: 'desc' } }); setItems(data.items); setMeta(data.meta || { page: nextPage, limit, totalRecords: 0, totalPages: 0 }); setError(''); } catch { setError('Products could not be loaded.'); } }
+  useEffect(() => { load(page); }, [search, page, limit]);
   useEffect(() => { api.get('/categories').then(({ data }) => setCategories(data.items)).catch(() => {}); }, []);
   function closeProductForm() { setShow(false); setEditingProduct(null); setForm(emptyProduct()); }
   function editProduct(product) {
     setEditingProduct(product);
-    setForm({ name: product.name, sku: product.sku || '', imageKey: product.imagePath || '', categoryId: product.categoryId || '', baseUnit: product.baseUnit, sellingPrice: String(product.sellingPrice), costPrice: String(product.costPrice), lowStockThreshold: String(product.lowStockThreshold) });
+    setForm({ name: product.name, sku: product.sku || '', imageKey: product.imagePath || '', categoryId: product.categoryId || '', baseUnit: product.baseUnit, lowStockThreshold: String(product.lowStockThreshold) });
     if (product.categoryId && !categories.some((category) => category.id === product.categoryId)) setCategories((current) => [...current, { id: product.categoryId, name: `${product.categoryName} (archived)` }]);
     setShow(true);
   }
@@ -27,8 +27,13 @@ export default function Products() {
     event.preventDefault();
     try {
       const payload = { ...form, categoryId: form.categoryId || null };
-      if (editingProduct) await api.patch(`/products/${editingProduct.id}`, payload); else await api.post('/products', payload);
-      closeProductForm(); await load();
+      if (editingProduct) {
+        await api.patch(`/products/${editingProduct.id}`, payload);
+        closeProductForm(); await load();
+        return;
+      }
+      await api.post('/products', payload);
+      closeProductForm(); setSearch(''); setPage(1); await load(1, '');
     } catch (err) { setError(err.response?.data?.error || 'Product could not be saved.'); }
   }
   async function openUnits(product) {
@@ -41,11 +46,11 @@ export default function Products() {
     try { await api.post(`/products/${unitTarget.id}/units`, unitForm); const { data } = await api.get(`/products/${unitTarget.id}/units`); setUnits(data.items); setUnitForm(emptyUnit()); }
     catch (err) { setError(err.response?.data?.error || 'Packaging unit could not be saved.'); }
   }
-  return <div className="content-page">
+  return <div className="content-page products-page" style={{ '--page-offset': (page - 1) * limit }}>
     <div className="page-heading"><div><div className="date-label">CATALOGUE</div><h1>Products</h1><p>Keep your drinks, categories, prices, and stock thresholds in order.</p></div>{canManage(user) && <button className="button button-primary" onClick={() => { setEditingProduct(null); setForm(emptyProduct()); setShow(true); }}><Plus size={17} /> Add product</button>}</div>
     {error && <div className="notice notice-error">{error}</div>}
-    <div className="table-toolbar"><div className="search-box"><Search size={17} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search name or SKU" /></div><span className="result-count">{items.length} products</span></div>
-    <div className="panel table-panel"><div className="table-scroll"><table><thead><tr><th>PRODUCT</th><th>CATEGORY</th><th>SKU</th><th>SELLING PRICE</th><th>COST PRICE</th><th>IN STOCK</th><th>STATUS</th><th>MANAGE</th></tr></thead><tbody>{items.map((product) => <tr key={product.id}><td><div className="product-cell"><div className="product-icon">{productImage(product) ? <img src={productImage(product)} alt="" loading="lazy" /> : <Package size={17} />}</div><div><b>{product.name}</b><small>Per {product.baseUnit}</small></div></div></td><td>{product.categoryName || 'Uncategorized'}</td><td>{product.sku || '—'}</td><td className="table-money">{currency(product.sellingPrice)}</td><td>{currency(product.costPrice)}</td><td>{product.stockQuantity} {product.baseUnit}s</td><td><span className={`status-chip ${Number(product.stockQuantity) <= Number(product.lowStockThreshold) ? 'status-low' : 'status-good'}`}>{Number(product.stockQuantity) <= Number(product.lowStockThreshold) ? 'Low stock' : 'In stock'}</span></td><td><div className="category-actions">{canManage(user) && <><button className="button button-small button-outline" onClick={() => editProduct(product)}><Pencil size={13} /> Edit</button><button className="button button-small button-outline" onClick={() => openUnits(product)}><Box size={14} /> Units</button></>}</div></td></tr>)}</tbody></table>{!items.length && <div className="table-empty"><div className="empty-icon"><Package size={19} /></div><b>No products yet</b><span>Add your first product to get the stock list started.</span>{canManage(user) && <button className="text-link" onClick={() => setShow(true)}>Add a product <Plus size={14} /></button>}</div>}</div></div>
+    <div className="table-toolbar"><div className="search-box"><Search size={17} /><input value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="Search name or SKU" /></div><span className="result-count">{meta.totalRecords} products</span><label>Rows<select aria-label="Products per page" value={limit} onChange={(event) => { setLimit(Number(event.target.value)); setPage(1); }}><option value={5}>5</option><option value={10}>10</option><option value={25}>25</option><option value={50}>50</option></select></label></div>
+    <div className="panel table-panel"><div className="table-scroll"><table><thead><tr><th>PRODUCT</th><th>CATEGORY</th><th>SKU</th><th>IN STOCK</th><th>STATUS</th><th>MANAGE</th></tr></thead><tbody>{items.map((product) => <tr key={product.id}><td><div className="product-cell"><div className="product-icon">{productImage(product) ? <img src={productImage(product)} alt="" loading="lazy" /> : <Package size={17} />}</div><div><b>{product.name}</b><small>Per {product.baseUnit}</small></div></div></td><td>{product.categoryName || 'Uncategorized'}</td><td>{product.sku || '—'}</td><td>{product.stockQuantity} {product.baseUnit}s</td><td><span className={`status-chip ${Number(product.stockQuantity) <= Number(product.lowStockThreshold) ? 'status-low' : 'status-good'}`}>{Number(product.stockQuantity) <= Number(product.lowStockThreshold) ? 'Low stock' : 'In stock'}</span></td><td><div className="category-actions">{canManage(user) && <><button className="button button-small button-outline" onClick={() => editProduct(product)}><Pencil size={13} /> Edit</button><button className="button button-small button-outline" onClick={() => openUnits(product)}><Box size={14} /> Units</button></>}</div></td></tr>)}</tbody></table>{!items.length && <div className="table-empty"><div className="empty-icon"><Package size={19} /></div><b>No products yet</b><span>Add your first product to get the stock list started.</span>{canManage(user) && <button className="text-link" onClick={() => setShow(true)}>Add a product <Plus size={14} /></button>}</div>}</div>{meta.totalRecords > 0 && <div className="table-pagination"><button type="button" className="button button-quiet" disabled={page <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))}>Previous</button><span>Page {meta.page || 1} of {meta.totalPages}</span><button type="button" className="button button-quiet" disabled={page >= meta.totalPages} onClick={() => setPage((current) => Math.min(meta.totalPages, current + 1))}>Next</button></div>}</div>
     {show && <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && closeProductForm()}><form className="modal" onSubmit={save}>
       <div className="modal-title"><div><span className="section-label">PRODUCT CATALOGUE</span><h2>{editingProduct ? 'Edit product' : 'Add product'}</h2></div><button className="icon-button" type="button" onClick={closeProductForm} aria-label="Close"><X size={18} /></button></div>
       <label>Product name<input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="e.g. Primus" /></label>
@@ -59,8 +64,7 @@ export default function Products() {
         <p className="field-hint">Shown on the point of sale, the cart, and this catalogue. Auto uses the product's category image.</p>
       </div>
       <div className="form-two"><label>Base stock unit<input required readOnly={Boolean(editingProduct)} value={form.baseUnit} onChange={(event) => setForm({ ...form, baseUnit: event.target.value })} placeholder="bottle" /></label><label>Low stock threshold<input type="number" min="0" step="0.001" value={form.lowStockThreshold} onChange={(event) => setForm({ ...form, lowStockThreshold: event.target.value })} /></label></div>
-      <div className="form-two"><label>Selling price (RWF)<input type="number" min="0" step="0.01" required value={form.sellingPrice} onChange={(event) => setForm({ ...form, sellingPrice: event.target.value })} /></label><label>Weighted-average cost (RWF)<input type="number" min="0" step="0.01" required readOnly={Boolean(editingProduct)} value={form.costPrice} onChange={(event) => setForm({ ...form, costPrice: event.target.value })} /></label></div>
-      <p className="field-hint">{editingProduct ? 'Base stock unit and weighted-average cost are preserved.' : 'Stock is recorded in the base unit. Add packaging conversions after saving the product.'}</p><div className="modal-actions"><button type="button" className="button button-quiet" onClick={closeProductForm}>Cancel</button><button className="button button-primary">{editingProduct ? 'Save changes' : 'Save product'}</button></div>
+      <p className="field-hint">Stock is recorded in the base unit. Selling price and weighted-average cost are managed when stock is received in the purchase workflow.</p><div className="modal-actions"><button type="button" className="button button-quiet" onClick={closeProductForm}>Cancel</button><button className="button button-primary">{editingProduct ? 'Save changes' : 'Save product'}</button></div>
     </form></div>}
     {unitTarget && <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setUnitTarget(null)}><div className="modal">
       <div className="modal-title"><div><span className="section-label">PACKAGING CONFIGURATION</span><h2>{unitTarget.name} units</h2></div><button className="icon-button" type="button" onClick={() => setUnitTarget(null)} aria-label="Close"><X size={18} /></button></div>
