@@ -11,7 +11,8 @@
     "db:validate": "prisma validate",
     "test": "node --test",
     "test:integration": "node tests/workflows.integration.js",
-    "test:tables": "node tests/run-table-service.mjs"
+    "test:tables": "node tests/run-table-service.mjs",
+    "test:pos": "node tests/run-pos-acceptance.mjs"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",
