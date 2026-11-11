@@ -199,12 +199,22 @@ router.get('/customers', asyncRoute(async (req, res) => {
 }));
 
 router.get('/categories', asyncRoute(async (req, res) => {
+  const { page, limit } = parsePageParams(req, { page: 1, limit: 100, sortBy: 'name', sortOrder: 'asc' });
   const includeArchived = req.query.includeArchived === 'true' && ['owner', 'manager'].includes(req.user.role);
-  const [items] = await pool.execute(
-    `SELECT id,name,archived_at AS archivedAt,created_at AS createdAt FROM product_categories WHERE business_id=? AND (?=1 OR archived_at IS NULL) ORDER BY archived_at IS NOT NULL,name`,
+  const [countRows] = await pool.execute(
+    'SELECT COUNT(*) AS total FROM product_categories WHERE business_id=? AND (?=1 OR archived_at IS NULL)',
     [req.user.businessId, includeArchived ? 1 : 0],
   );
-  res.json({ items });
+  const totalRecords = Number(countRows[0]?.total || 0);
+  const totalPages = totalRecords === 0 ? 0 : Math.ceil(totalRecords / limit);
+  const safePage = totalPages === 0 ? 1 : Math.min(page, totalPages);
+  const offset = (safePage - 1) * limit;
+  const [items] = await pool.execute(
+    `SELECT id,name,archived_at AS archivedAt,created_at AS createdAt FROM product_categories
+     WHERE business_id=? AND (?=1 OR archived_at IS NULL) ORDER BY archived_at IS NOT NULL,name LIMIT ? OFFSET ?`,
+    [req.user.businessId, includeArchived ? 1 : 0, limit, offset],
+  );
+  res.json({ items, meta: { page: safePage, limit, totalRecords, totalPages } });
 }));
 
 router.post('/categories', authorize('owner', 'manager'), asyncRoute(async (req, res) => {
@@ -590,6 +600,22 @@ router.post('/customers', authorize('owner', 'manager', 'cashier', 'accountant')
 }));
 
 router.get('/sales', asyncRoute(async (req, res) => {
+  const { page, limit } = parsePageParams(req, { page: 1, limit: 10, sortBy: 'createdAt', sortOrder: 'desc' });
+  const search = typeof req.query.search === 'string' ? `%${req.query.search.trim().slice(0, 80)}%` : null;
+  const searchSql = `(? IS NULL OR s.reference LIKE ? OR COALESCE(c.full_name, CASE WHEN s.sales_channel = 'TABLE' THEN CONCAT('Table ', t.code) ELSE 'Walk-in customer' END) LIKE ?)`;
+  const searchValues = [search, search, search];
+  const [countRows] = await pool.execute(
+    `SELECT COUNT(*) AS total FROM sales s
+     LEFT JOIN customers c ON c.id=s.customer_id AND c.business_id=s.business_id
+     LEFT JOIN table_sessions ts ON ts.id=s.table_session_id AND ts.business_id=s.business_id
+     LEFT JOIN bar_tables t ON t.id=ts.table_id
+     WHERE s.business_id=? AND ${searchSql}`,
+    [req.user.businessId, ...searchValues],
+  );
+  const totalRecords = Number(countRows[0]?.total || 0);
+  const totalPages = totalRecords === 0 ? 0 : Math.ceil(totalRecords / limit);
+  const safePage = totalPages === 0 ? 1 : Math.min(page, totalPages);
+  const offset = (safePage - 1) * limit;
   const [items] = await pool.execute(
     `SELECT s.id, s.reference, s.status, s.total, s.amount_paid AS amountPaid, s.balance_due AS balanceDue, s.created_at AS createdAt,
       s.sales_channel AS salesChannel, t.code AS tableCode, a.name AS areaName,
@@ -601,9 +627,10 @@ router.get('/sales', asyncRoute(async (req, res) => {
      LEFT JOIN bar_tables t ON t.id = ts.table_id
      LEFT JOIN bar_areas a ON a.id = t.area_id
      LEFT JOIN (SELECT sale_id,SUM(total) AS returnedTotal FROM sales_returns WHERE business_id=? GROUP BY sale_id) r ON r.sale_id=s.id
-     WHERE s.business_id = ? ORDER BY s.created_at DESC LIMIT 100`, [req.user.businessId, req.user.businessId],
+     WHERE s.business_id = ? AND ${searchSql} ORDER BY s.created_at DESC LIMIT ? OFFSET ?`,
+    [req.user.businessId, req.user.businessId, ...searchValues, limit, offset],
   );
-  res.json({ items });
+  res.json({ items, meta: { page: safePage, limit, totalRecords, totalPages } });
 }));
 
 router.get('/sales/:saleId', asyncRoute(async (req, res) => {
@@ -853,8 +880,17 @@ router.post('/debts/:customerId/payments', authorize('owner', 'manager', 'accoun
 }));
 
 router.get('/expenses', asyncRoute(async (req, res) => {
-  const [items] = await pool.execute('SELECT id, category, description, amount, payment_method AS paymentMethod, created_at AS createdAt FROM expenses WHERE business_id = ? ORDER BY created_at DESC LIMIT 100', businessScope(req));
-  res.json({ items });
+  const { page, limit } = parsePageParams(req, { page: 1, limit: 10, sortBy: 'createdAt', sortOrder: 'desc' });
+  const [countRows] = await pool.execute('SELECT COUNT(*) AS total FROM expenses WHERE business_id = ?', businessScope(req));
+  const totalRecords = Number(countRows[0]?.total || 0);
+  const totalPages = totalRecords === 0 ? 0 : Math.ceil(totalRecords / limit);
+  const safePage = totalPages === 0 ? 1 : Math.min(page, totalPages);
+  const offset = (safePage - 1) * limit;
+  const [items] = await pool.execute(
+    'SELECT id, category, description, amount, payment_method AS paymentMethod, created_at AS createdAt FROM expenses WHERE business_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?',
+    [req.user.businessId, limit, offset],
+  );
+  res.json({ items, meta: { page: safePage, limit, totalRecords, totalPages } });
 }));
 
 router.post('/expenses', authorize('owner', 'manager', 'accountant'), asyncRoute(async (req, res) => {
@@ -876,13 +912,27 @@ router.post('/expenses', authorize('owner', 'manager', 'accountant'), asyncRoute
 }));
 
 router.get('/cash-sessions', asyncRoute(async (req, res) => {
+  const { page, limit } = parsePageParams(req, { page: 1, limit: 10, sortBy: 'openedAt', sortOrder: 'desc' });
+  const [countRows] = await pool.execute('SELECT COUNT(*) AS total FROM cash_sessions WHERE business_id = ? AND user_id = ?', [req.user.businessId, req.user.id]);
+  const totalRecords = Number(countRows[0]?.total || 0);
+  const totalPages = totalRecords === 0 ? 0 : Math.ceil(totalRecords / limit);
+  const safePage = totalPages === 0 ? 1 : Math.min(page, totalPages);
+  const offset = (safePage - 1) * limit;
   const [items] = await pool.execute(
     `SELECT cs.id, cs.status, cs.opening_balance AS openingBalance, cs.actual_cash AS actualCash, cs.discrepancy_note AS discrepancyNote, cs.opened_at AS openedAt, cs.closed_at AS closedAt,
       cs.opening_balance + COALESCE(SUM(CASE WHEN cm.movement_type='opening_float' THEN 0 WHEN cm.direction='in' THEN cm.amount WHEN cm.direction='out' THEN -cm.amount ELSE 0 END),0) AS expectedCash
      FROM cash_sessions cs LEFT JOIN cash_movements cm ON cm.session_id = cs.id AND cm.business_id = cs.business_id
-     WHERE cs.business_id = ? AND cs.user_id = ? GROUP BY cs.id ORDER BY cs.opened_at DESC LIMIT 50`, [req.user.businessId, req.user.id],
+     WHERE cs.business_id = ? AND cs.user_id = ? GROUP BY cs.id ORDER BY cs.opened_at DESC LIMIT ? OFFSET ?`,
+    [req.user.businessId, req.user.id, limit, offset],
   );
-  res.json({ active: items.find((item) => item.status === 'open') || null, items });
+  const [activeRows] = await pool.execute(
+    `SELECT cs.id, cs.status, cs.opening_balance AS openingBalance, cs.actual_cash AS actualCash, cs.discrepancy_note AS discrepancyNote, cs.opened_at AS openedAt, cs.closed_at AS closedAt,
+      cs.opening_balance + COALESCE(SUM(CASE WHEN cm.movement_type='opening_float' THEN 0 WHEN cm.direction='in' THEN cm.amount WHEN cm.direction='out' THEN -cm.amount ELSE 0 END),0) AS expectedCash
+     FROM cash_sessions cs LEFT JOIN cash_movements cm ON cm.session_id = cs.id AND cm.business_id = cs.business_id
+     WHERE cs.business_id = ? AND cs.user_id = ? AND cs.status = 'open' GROUP BY cs.id LIMIT 1`,
+    [req.user.businessId, req.user.id],
+  );
+  res.json({ active: activeRows[0] || null, items, meta: { page: safePage, limit, totalRecords, totalPages } });
 }));
 
 router.post('/cash-sessions', authorize('owner', 'manager', 'cashier'), asyncRoute(async (req, res) => {
@@ -1046,8 +1096,17 @@ router.get('/reports', authorize('owner', 'manager', 'accountant'), asyncRoute(a
 }));
 
 router.get('/users', authorize('owner'), asyncRoute(async (req, res) => {
-  const [items] = await pool.execute('SELECT id,name,email,role,active,created_at AS createdAt FROM users WHERE business_id=? ORDER BY created_at', businessScope(req));
-  res.json({ items });
+  const { page, limit } = parsePageParams(req, { page: 1, limit: 10, sortBy: 'createdAt', sortOrder: 'asc' });
+  const [countRows] = await pool.execute('SELECT COUNT(*) AS total FROM users WHERE business_id=?', businessScope(req));
+  const totalRecords = Number(countRows[0]?.total || 0);
+  const totalPages = totalRecords === 0 ? 0 : Math.ceil(totalRecords / limit);
+  const safePage = totalPages === 0 ? 1 : Math.min(page, totalPages);
+  const offset = (safePage - 1) * limit;
+  const [items] = await pool.execute(
+    'SELECT id,name,email,role,active,created_at AS createdAt FROM users WHERE business_id=? ORDER BY created_at LIMIT ? OFFSET ?',
+    [req.user.businessId, limit, offset],
+  );
+  res.json({ items, meta: { page: safePage, limit, totalRecords, totalPages } });
 }));
 
 router.post('/users', authorize('owner'), asyncRoute(async (req, res) => {
