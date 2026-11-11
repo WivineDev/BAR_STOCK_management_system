@@ -44,26 +44,52 @@ function nonNegativeQuantity(value, field) {
   if (!/^(?:0|[1-9]\d{0,8})(?:\.\d{1,3})?$/.test(text)) fail(400, `${field} must be a non-negative quantity with up to three decimal places`);
   return text;
 }
+function parsePageParams(req, defaults = { page: 1, limit: 25, sortBy: 'name', sortOrder: 'asc' }) {
+  const page = Number.parseInt(req.query?.page ?? String(defaults.page), 10);
+  const limit = Number.parseInt(req.query?.limit ?? String(defaults.limit), 10);
+  const safePage = Number.isFinite(page) && page > 0 ? page : defaults.page;
+  const safeLimit = Number.isFinite(limit) && limit > 0 ? Math.min(limit, 100) : defaults.limit;
+  const rawSortBy = typeof req.query?.sortBy === 'string' ? req.query.sortBy : defaults.sortBy;
+  const rawSortOrder = req.query?.sortOrder === 'desc' ? 'desc' : 'asc';
+  return { page: safePage, limit: safeLimit, sortBy: rawSortBy, sortOrder: rawSortOrder };
+}
 
 router.get('/products', asyncRoute(async (req, res) => {
+  const { page, limit, sortBy, sortOrder } = parsePageParams(req, { page: 1, limit: 25, sortBy: 'name', sortOrder: 'asc' });
   const search = typeof req.query.search === 'string' ? `%${req.query.search.trim().slice(0, 80)}%` : null;
+  const orderMap = {
+    name: 'p.name',
+    sku: 'p.sku',
+    createdAt: 'p.created_at',
+    stockQuantity: 'stockQuantity',
+  };
+  const selectedOrder = orderMap[sortBy] || 'p.name';
+  const [countRows] = await pool.execute(
+    `SELECT COUNT(*) AS total
+     FROM products p
+     WHERE p.business_id = ? AND p.active = 1 AND (? IS NULL OR p.name LIKE ? OR p.sku LIKE ?)`, [req.user.businessId, search, search, search],
+  );
+  const totalRecords = Number(countRows[0]?.total || 0);
+  const totalPages = totalRecords === 0 ? 0 : Math.ceil(totalRecords / limit);
+  const safePage = totalPages === 0 ? 1 : Math.min(page, totalPages);
+  const offset = (safePage - 1) * limit;
   const [items] = await pool.execute(
-    `SELECT p.id, p.name, p.sku, p.image_path AS imagePath, p.category_id AS categoryId,pc.name AS categoryName,p.base_unit AS baseUnit, p.selling_price AS sellingPrice, p.cost_price AS costPrice,
-      p.low_stock_threshold AS lowStockThreshold, p.active, COALESCE(i.quantity, 0) AS stockQuantity
-     FROM products p LEFT JOIN inventory i ON i.product_id = p.id AND i.branch_id = p.branch_id
+    `SELECT p.id, p.name, p.sku, p.image_path AS imagePath, p.category_id AS categoryId, pc.name AS categoryName, p.base_unit AS baseUnit,
+      p.selling_price AS sellingPrice, p.cost_price AS costPrice, p.low_stock_threshold AS lowStockThreshold, p.active,
+      COALESCE(i.quantity, 0) AS stockQuantity
+     FROM products p
+     LEFT JOIN inventory i ON i.product_id = p.id AND i.branch_id = p.branch_id
      LEFT JOIN product_categories pc ON pc.id=p.category_id AND pc.business_id=p.business_id
      WHERE p.business_id = ? AND p.active = 1 AND (? IS NULL OR p.name LIKE ? OR p.sku LIKE ?)
-     ORDER BY p.name LIMIT 250`, [req.user.businessId, search, search, search],
+     ORDER BY ${selectedOrder} ${sortOrder.toUpperCase()} LIMIT ? OFFSET ?`, [req.user.businessId, search, search, search, limit, offset],
   );
-  res.json({ items });
+  res.json({ items, meta: { page: safePage, limit, totalRecords, totalPages } });
 }));
 
 router.post('/products', authorize('owner', 'manager'), asyncRoute(async (req, res) => {
-  const { name, sku = null, imageKey = '', categoryId = null, baseUnit = 'bottle', sellingPrice, costPrice, lowStockThreshold = '0' } = req.body || {};
+  const { name, sku = null, imageKey = '', categoryId = null, baseUnit = 'bottle', lowStockThreshold = '0' } = req.body || {};
   const label = normalizeLabel(name, 'Product name');
   const unit = normalizeLabel(baseUnit, 'Base unit', 40);
-  const sell = moneyText(toMinor(sellingPrice, 'Selling price'));
-  const cost = moneyText(toMinor(costPrice, 'Cost price'));
   const threshold = nonNegativeQuantity(lowStockThreshold, 'Low stock threshold');
   const image = imageChoice(imageKey);
   if (sku !== null && (typeof sku !== 'string' || sku.trim().length > 60)) fail(400, 'SKU must be 60 characters or fewer');
@@ -80,10 +106,10 @@ router.post('/products', authorize('owner', 'manager'), asyncRoute(async (req, r
     const branchId = branches[0].id;
     await connection.execute(
       `INSERT INTO products (id, business_id, branch_id, category_id, name, sku, image_path, base_unit, selling_price, cost_price, low_stock_threshold)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [productId, req.user.businessId, branchId, categoryId, label, sku?.trim() || null, image ?? null, unit, sell, cost, threshold],
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?)`, [productId, req.user.businessId, branchId, categoryId, label, sku?.trim() || null, image ?? null, unit, threshold],
     );
     await connection.execute('INSERT INTO inventory (id, business_id, branch_id, product_id, quantity) VALUES (UUID(), ?, ?, ?, 0)', [req.user.businessId, branchId, productId]);
-    await connection.execute('INSERT INTO product_units (id, business_id, product_id, unit_name, factor_to_base, selling_price, purchase_price, is_base) VALUES (?, ?, ?, ?, 1, ?, ?, 1)', [baseUnitId, req.user.businessId, productId, unit, sell, cost]);
+    await connection.execute('INSERT INTO product_units (id, business_id, product_id, unit_name, factor_to_base, selling_price, purchase_price, is_base) VALUES (?, ?, ?, ?, 1, 0, 0, 1)', [baseUnitId, req.user.businessId, productId, unit]);
     await writeAudit(connection, { businessId: req.user.businessId, branchId, userId: req.user.id, action: 'created', module: 'products', recordId: productId, details: { name: label, sku: sku?.trim() || null, image: image ?? null } });
     return productId;
   });
@@ -97,7 +123,6 @@ router.patch('/products/:productId', authorize('owner', 'manager'), asyncRoute(a
   if (sku !== null && (typeof sku !== 'string' || sku.trim().length > 60)) fail(400, 'SKU must be 60 characters or fewer');
   const image = imageChoice(req.body?.imageKey);
   const categoryId = req.body?.categoryId || null;
-  const sellingPrice = moneyText(toMinor(req.body?.sellingPrice, 'Selling price'));
   const threshold = nonNegativeQuantity(req.body?.lowStockThreshold, 'Low stock threshold');
   const result = await withTransaction(async (connection) => {
     const [products] = await connection.execute('SELECT id,branch_id AS branchId,category_id AS categoryId,image_path AS imagePath FROM products WHERE id=? AND business_id=? AND active=1 FOR UPDATE', [req.params.productId, req.user.businessId]);
@@ -109,22 +134,87 @@ router.patch('/products/:productId', authorize('owner', 'manager'), asyncRoute(a
       if (categories[0].archivedAt && products[0].categoryId !== categoryId) fail(400, 'The selected category is unavailable');
     }
     const nextImage = image === undefined ? products[0].imagePath : image;
-    await connection.execute('UPDATE products SET name=?,sku=?,image_path=?,category_id=?,selling_price=?,low_stock_threshold=? WHERE id=? AND business_id=?', [name, sku?.trim() || null, nextImage, categoryId, sellingPrice, threshold, req.params.productId, req.user.businessId]);
-    await connection.execute('UPDATE product_units SET selling_price=? WHERE product_id=? AND business_id=? AND is_base=1', [sellingPrice, req.params.productId, req.user.businessId]);
-    await writeAudit(connection, { businessId: req.user.businessId, branchId: products[0].branchId, userId: req.user.id, action: 'updated', module: 'products', recordId: req.params.productId, details: { name, sku: sku?.trim() || null, image: nextImage, categoryId, sellingPrice, lowStockThreshold: threshold } });
+    await connection.execute('UPDATE products SET name=?,sku=?,image_path=?,category_id=?,low_stock_threshold=? WHERE id=? AND business_id=?', [name, sku?.trim() || null, nextImage, categoryId, threshold, req.params.productId, req.user.businessId]);
+    await writeAudit(connection, { businessId: req.user.businessId, branchId: products[0].branchId, userId: req.user.id, action: 'updated', module: 'products', recordId: req.params.productId, details: { name, sku: sku?.trim() || null, image: nextImage, categoryId, lowStockThreshold: threshold } });
     const [rows] = await connection.execute('SELECT p.id,p.name,p.sku,p.image_path AS imagePath,p.category_id AS categoryId,pc.name AS categoryName,p.base_unit AS baseUnit,p.selling_price AS sellingPrice,p.cost_price AS costPrice,p.low_stock_threshold AS lowStockThreshold,COALESCE(i.quantity,0) AS stockQuantity FROM products p LEFT JOIN product_categories pc ON pc.id=p.category_id AND pc.business_id=p.business_id LEFT JOIN inventory i ON i.product_id=p.id AND i.branch_id=p.branch_id WHERE p.id=? AND p.business_id=?', [req.params.productId, req.user.businessId]);
     return rows[0];
   });
   res.json({ product: result });
 }));
 
-router.get('/categories', asyncRoute(async (req, res) => {
-  const includeArchived = req.query.includeArchived === 'true' && ['owner', 'manager'].includes(req.user.role);
+router.get('/purchases', asyncRoute(async (req, res) => {
+  const { page, limit, sortBy, sortOrder } = parsePageParams(req, { page: 1, limit: 25, sortBy: 'createdAt', sortOrder: 'desc' });
+  const orderMap = {
+    createdAt: 'p.created_at',
+    total: 'p.total',
+    supplierName: 'supplierName',
+    reference: 'p.reference',
+  };
+  const selectedOrder = orderMap[sortBy] || 'p.created_at';
+  const [countRows] = await pool.execute('SELECT COUNT(*) AS total FROM purchases WHERE business_id=?', [req.user.businessId]);
+  const totalRecords = Number(countRows[0]?.total || 0);
+  const totalPages = totalRecords === 0 ? 0 : Math.ceil(totalRecords / limit);
+  const safePage = totalPages === 0 ? 1 : Math.min(page, totalPages);
+  const offset = (safePage - 1) * limit;
   const [items] = await pool.execute(
-    `SELECT id,name,archived_at AS archivedAt,created_at AS createdAt FROM product_categories WHERE business_id=? AND (?=1 OR archived_at IS NULL) ORDER BY archived_at IS NOT NULL,name`,
+    `SELECT p.id, p.reference, p.total, p.amount_paid AS amountPaid, p.balance_due AS balanceDue, p.created_at AS createdAt,
+      s.name AS supplierName FROM purchases p JOIN suppliers s ON s.id=p.supplier_id AND s.business_id=p.business_id
+     WHERE p.business_id=? ORDER BY ${selectedOrder} ${sortOrder.toUpperCase()} LIMIT ? OFFSET ?`, [req.user.businessId, limit, offset],
+  );
+  res.json({ items, meta: { page: safePage, limit, totalRecords, totalPages } });
+}));
+
+router.get('/suppliers', asyncRoute(async (req, res) => {
+  const { page, limit, sortBy, sortOrder } = parsePageParams(req, { page: 1, limit: 25, sortBy: 'name', sortOrder: 'asc' });
+  const orderMap = { name: 's.name', balanceDue: 'balanceDue' };
+  const selectedOrder = orderMap[sortBy] || 's.name';
+  const [countRows] = await pool.execute('SELECT COUNT(*) AS total FROM suppliers WHERE business_id=? AND active=1', [req.user.businessId]);
+  const totalRecords = Number(countRows[0]?.total || 0);
+  const totalPages = totalRecords === 0 ? 0 : Math.ceil(totalRecords / limit);
+  const safePage = totalPages === 0 ? 1 : Math.min(page, totalPages);
+  const offset = (safePage - 1) * limit;
+  const [items] = await pool.execute(
+    `SELECT s.id, s.name, s.phone, s.email, s.address, COALESCE(SUM(p.balance_due),0) AS balanceDue
+     FROM suppliers s LEFT JOIN purchases p ON p.supplier_id=s.id AND p.business_id=s.business_id AND p.status='received'
+     WHERE s.business_id=? AND s.active=1 GROUP BY s.id ORDER BY ${selectedOrder} ${sortOrder.toUpperCase()} LIMIT ? OFFSET ?`, [req.user.businessId, limit, offset],
+  );
+  res.json({ items, meta: { page: safePage, limit, totalRecords, totalPages } });
+}));
+
+router.get('/customers', asyncRoute(async (req, res) => {
+  const { page, limit, sortBy, sortOrder } = parsePageParams(req, { page: 1, limit: 25, sortBy: 'name', sortOrder: 'asc' });
+  const orderMap = { name: 'c.full_name', balanceDue: 'balanceDue' };
+  const selectedOrder = orderMap[sortBy] || 'c.full_name';
+  const [countRows] = await pool.execute('SELECT COUNT(*) AS total FROM customers WHERE business_id=? AND active=1', [req.user.businessId]);
+  const totalRecords = Number(countRows[0]?.total || 0);
+  const totalPages = totalRecords === 0 ? 0 : Math.ceil(totalRecords / limit);
+  const safePage = totalPages === 0 ? 1 : Math.min(page, totalPages);
+  const offset = (safePage - 1) * limit;
+  const [items] = await pool.execute(
+    `SELECT c.id,c.full_name AS name,c.phone,COALESCE(SUM(s.balance_due),0) AS balanceDue
+     FROM customers c LEFT JOIN sales s ON s.customer_id=c.id AND s.business_id=c.business_id AND s.status IN ('completed','partially_returned')
+     WHERE c.business_id=? AND c.active=1 GROUP BY c.id ORDER BY ${selectedOrder} ${sortOrder.toUpperCase()} LIMIT ? OFFSET ?`, [req.user.businessId, limit, offset],
+  );
+  res.json({ items, meta: { page: safePage, limit, totalRecords, totalPages } });
+}));
+
+router.get('/categories', asyncRoute(async (req, res) => {
+  const { page, limit } = parsePageParams(req, { page: 1, limit: 100, sortBy: 'name', sortOrder: 'asc' });
+  const includeArchived = req.query.includeArchived === 'true' && ['owner', 'manager'].includes(req.user.role);
+  const [countRows] = await pool.execute(
+    'SELECT COUNT(*) AS total FROM product_categories WHERE business_id=? AND (?=1 OR archived_at IS NULL)',
     [req.user.businessId, includeArchived ? 1 : 0],
   );
-  res.json({ items });
+  const totalRecords = Number(countRows[0]?.total || 0);
+  const totalPages = totalRecords === 0 ? 0 : Math.ceil(totalRecords / limit);
+  const safePage = totalPages === 0 ? 1 : Math.min(page, totalPages);
+  const offset = (safePage - 1) * limit;
+  const [items] = await pool.execute(
+    `SELECT id,name,archived_at AS archivedAt,created_at AS createdAt FROM product_categories
+     WHERE business_id=? AND (?=1 OR archived_at IS NULL) ORDER BY archived_at IS NOT NULL,name LIMIT ? OFFSET ?`,
+    [req.user.businessId, includeArchived ? 1 : 0, limit, offset],
+  );
+  res.json({ items, meta: { page: safePage, limit, totalRecords, totalPages } });
 }));
 
 router.post('/categories', authorize('owner', 'manager'), asyncRoute(async (req, res) => {
@@ -287,19 +377,21 @@ router.post('/purchases', authorize('owner', 'manager', 'storekeeper', 'accounta
       const quantity = toQuantity(line.quantity, 'Quantity');
       const [unitRows] = await connection.execute(
         `SELECT p.id, p.name, p.base_unit AS baseUnit, p.cost_price AS costPrice, i.quantity AS stockQuantity,
-          pu.id AS unitId, pu.unit_name AS unitName, pu.factor_to_base AS factorToBase, pu.purchase_price AS purchasePrice
+          pu.id AS unitId, pu.unit_name AS unitName, pu.factor_to_base AS factorToBase, pu.purchase_price AS purchasePrice,
+          pu.selling_price AS sellingPrice, pu.is_base AS isBase
          FROM products p JOIN inventory i ON i.product_id=p.id AND i.branch_id=p.branch_id
          JOIN product_units pu ON pu.product_id=p.id AND pu.business_id=p.business_id AND pu.active=1
          WHERE p.id=? AND p.business_id=? AND p.branch_id=? AND p.active=1 FOR UPDATE`, [line.productId, req.user.businessId, branchId],
       );
       const unit = unitRows.find((row) => line.unitId ? row.unitId === line.unitId : Number(row.factorToBase) === 1 && row.unitName === row.baseUnit);
-      if (!unit) fail(404, line.unitId ? 'The selected product unit was not found' : 'A selected product was not found');
+      if (!unit) fail(404, line.unitId ? 'The selected product unit was not found' : 'This product has no active base unit for the selected branch');
       const unitCost = line.unitCost === undefined ? unit.purchasePrice : moneyText(toMinor(line.unitCost, 'Unit purchase price'));
+      const sellingPrice = line.sellingPrice === undefined ? moneyText(toMinor(unit.sellingPrice, 'Selling price')) : moneyText(toMinor(line.sellingPrice, 'Selling price'));
       const baseQtyMilli = (quantityToMilli(quantity) * quantityToMilli(unit.factorToBase) + 500n) / 1000n;
       if (baseQtyMilli <= 0n) fail(400, 'Converted purchase quantity must be greater than zero');
       const lineTotal = multiplyMinorByQuantity(unitCost, quantity);
       totalMinor += lineTotal;
-      parsed.push({ ...unit, quantity, baseQuantity: fromMilliQuantity(baseQtyMilli), baseQtyMilli, unitCost, lineTotal: moneyText(lineTotal) });
+      parsed.push({ ...unit, quantity, baseQuantity: fromMilliQuantity(baseQtyMilli), baseQtyMilli, unitCost, sellingPrice, lineTotal: moneyText(lineTotal) });
     }
     const paymentLines = payments.map((payment) => {
       if (!METHODS.includes(payment.method)) fail(400, 'Choose a supported payment method');
@@ -332,6 +424,8 @@ router.post('/purchases', authorize('owner', 'manager', 'storekeeper', 'accounta
       await connection.execute('UPDATE inventory SET quantity=?,updated_at=CURRENT_TIMESTAMP WHERE product_id=? AND branch_id=?', [fromMilliQuantity(nextQty), line.id, branchId]);
       await connection.execute('UPDATE products SET cost_price=? WHERE id=? AND business_id=?', [newCost, line.id, req.user.businessId]);
       await connection.execute('UPDATE product_units SET purchase_price=? WHERE product_id=? AND business_id=? AND is_base=1', [newCost, line.id, req.user.businessId]);
+      await connection.execute('UPDATE product_units SET selling_price=? WHERE id=? AND product_id=? AND business_id=?', [line.sellingPrice, line.unitId, line.id, req.user.businessId]);
+      if (Number(line.isBase) === 1) await connection.execute('UPDATE products SET selling_price=? WHERE id=? AND business_id=?', [line.sellingPrice, line.id, req.user.businessId]);
       await connection.execute(
         `INSERT INTO stock_movements (id,business_id,branch_id,product_id,user_id,movement_type,quantity_delta,unit,reference_type,reference_id,notes)
          VALUES (UUID(),?,?,?,?, 'purchase', ?, ?, 'purchase', ?, ?)`,
@@ -341,7 +435,7 @@ router.post('/purchases', authorize('owner', 'manager', 'storekeeper', 'accounta
     for (const payment of paymentLines) {
       const paymentId = randomUUID();
       await connection.execute('INSERT INTO purchase_payments (id,business_id,branch_id,purchase_id,user_id,method,amount) VALUES (?,?,?,?,?,?,?)', [paymentId, req.user.businessId, branchId, purchaseId, req.user.id, payment.method, moneyText(payment.amount)]);
-      if (payment.method === 'cash') await connection.execute('INSERT INTO cash_movements (id,business_id,branch_id,session_id,user_id,movement_type,direction,amount,reference_type,reference_id,notes) VALUES (?,?,?,?,?,\'expense\',\'out\',?,\'purchase\',?,?)', [req.user.businessId, branchId, cashSessions[0].id, req.user.id, moneyText(payment.amount), purchaseId, `Supplier purchase ${references[0].reference}`]);
+      if (payment.method === 'cash') await connection.execute('INSERT INTO cash_movements (id,business_id,branch_id,session_id,user_id,movement_type,direction,amount,reference_type,reference_id,notes) VALUES (?,?,?,?,?,\'expense\',\'out\',?,\'purchase\',?,?)', [randomUUID(), req.user.businessId, branchId, cashSessions[0].id, req.user.id, moneyText(payment.amount), purchaseId, `Supplier purchase ${references[0].reference}`]);
     }
     await writeAudit(connection, { businessId: req.user.businessId, branchId, userId: req.user.id, action: 'received', module: 'purchases', recordId: purchaseId, reference: references[0].reference, details: { supplierId, total: moneyText(totalMinor), paid: moneyText(paidMinor), balance: moneyText(balanceMinor), lines: parsed.length } });
     return { id: purchaseId, reference: references[0].reference, total: moneyText(totalMinor), amountPaid: moneyText(paidMinor), balanceDue: moneyText(balanceMinor), status: 'received' };
@@ -506,6 +600,22 @@ router.post('/customers', authorize('owner', 'manager', 'cashier', 'accountant')
 }));
 
 router.get('/sales', asyncRoute(async (req, res) => {
+  const { page, limit } = parsePageParams(req, { page: 1, limit: 10, sortBy: 'createdAt', sortOrder: 'desc' });
+  const search = typeof req.query.search === 'string' ? `%${req.query.search.trim().slice(0, 80)}%` : null;
+  const searchSql = `(? IS NULL OR s.reference LIKE ? OR COALESCE(c.full_name, CASE WHEN s.sales_channel = 'TABLE' THEN CONCAT('Table ', t.code) ELSE 'Walk-in customer' END) LIKE ?)`;
+  const searchValues = [search, search, search];
+  const [countRows] = await pool.execute(
+    `SELECT COUNT(*) AS total FROM sales s
+     LEFT JOIN customers c ON c.id=s.customer_id AND c.business_id=s.business_id
+     LEFT JOIN table_sessions ts ON ts.id=s.table_session_id AND ts.business_id=s.business_id
+     LEFT JOIN bar_tables t ON t.id=ts.table_id
+     WHERE s.business_id=? AND ${searchSql}`,
+    [req.user.businessId, ...searchValues],
+  );
+  const totalRecords = Number(countRows[0]?.total || 0);
+  const totalPages = totalRecords === 0 ? 0 : Math.ceil(totalRecords / limit);
+  const safePage = totalPages === 0 ? 1 : Math.min(page, totalPages);
+  const offset = (safePage - 1) * limit;
   const [items] = await pool.execute(
     `SELECT s.id, s.reference, s.status, s.total, s.amount_paid AS amountPaid, s.balance_due AS balanceDue, s.created_at AS createdAt,
       s.sales_channel AS salesChannel, t.code AS tableCode, a.name AS areaName,
@@ -517,9 +627,10 @@ router.get('/sales', asyncRoute(async (req, res) => {
      LEFT JOIN bar_tables t ON t.id = ts.table_id
      LEFT JOIN bar_areas a ON a.id = t.area_id
      LEFT JOIN (SELECT sale_id,SUM(total) AS returnedTotal FROM sales_returns WHERE business_id=? GROUP BY sale_id) r ON r.sale_id=s.id
-     WHERE s.business_id = ? ORDER BY s.created_at DESC LIMIT 100`, [req.user.businessId, req.user.businessId],
+     WHERE s.business_id = ? AND ${searchSql} ORDER BY s.created_at DESC LIMIT ? OFFSET ?`,
+    [req.user.businessId, req.user.businessId, ...searchValues, limit, offset],
   );
-  res.json({ items });
+  res.json({ items, meta: { page: safePage, limit, totalRecords, totalPages } });
 }));
 
 router.get('/sales/:saleId', asyncRoute(async (req, res) => {
@@ -769,8 +880,17 @@ router.post('/debts/:customerId/payments', authorize('owner', 'manager', 'accoun
 }));
 
 router.get('/expenses', asyncRoute(async (req, res) => {
-  const [items] = await pool.execute('SELECT id, category, description, amount, payment_method AS paymentMethod, created_at AS createdAt FROM expenses WHERE business_id = ? ORDER BY created_at DESC LIMIT 100', businessScope(req));
-  res.json({ items });
+  const { page, limit } = parsePageParams(req, { page: 1, limit: 10, sortBy: 'createdAt', sortOrder: 'desc' });
+  const [countRows] = await pool.execute('SELECT COUNT(*) AS total FROM expenses WHERE business_id = ?', businessScope(req));
+  const totalRecords = Number(countRows[0]?.total || 0);
+  const totalPages = totalRecords === 0 ? 0 : Math.ceil(totalRecords / limit);
+  const safePage = totalPages === 0 ? 1 : Math.min(page, totalPages);
+  const offset = (safePage - 1) * limit;
+  const [items] = await pool.execute(
+    'SELECT id, category, description, amount, payment_method AS paymentMethod, created_at AS createdAt FROM expenses WHERE business_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?',
+    [req.user.businessId, limit, offset],
+  );
+  res.json({ items, meta: { page: safePage, limit, totalRecords, totalPages } });
 }));
 
 router.post('/expenses', authorize('owner', 'manager', 'accountant'), asyncRoute(async (req, res) => {
@@ -792,13 +912,27 @@ router.post('/expenses', authorize('owner', 'manager', 'accountant'), asyncRoute
 }));
 
 router.get('/cash-sessions', asyncRoute(async (req, res) => {
+  const { page, limit } = parsePageParams(req, { page: 1, limit: 10, sortBy: 'openedAt', sortOrder: 'desc' });
+  const [countRows] = await pool.execute('SELECT COUNT(*) AS total FROM cash_sessions WHERE business_id = ? AND user_id = ?', [req.user.businessId, req.user.id]);
+  const totalRecords = Number(countRows[0]?.total || 0);
+  const totalPages = totalRecords === 0 ? 0 : Math.ceil(totalRecords / limit);
+  const safePage = totalPages === 0 ? 1 : Math.min(page, totalPages);
+  const offset = (safePage - 1) * limit;
   const [items] = await pool.execute(
     `SELECT cs.id, cs.status, cs.opening_balance AS openingBalance, cs.actual_cash AS actualCash, cs.discrepancy_note AS discrepancyNote, cs.opened_at AS openedAt, cs.closed_at AS closedAt,
       cs.opening_balance + COALESCE(SUM(CASE WHEN cm.movement_type='opening_float' THEN 0 WHEN cm.direction='in' THEN cm.amount WHEN cm.direction='out' THEN -cm.amount ELSE 0 END),0) AS expectedCash
      FROM cash_sessions cs LEFT JOIN cash_movements cm ON cm.session_id = cs.id AND cm.business_id = cs.business_id
-     WHERE cs.business_id = ? AND cs.user_id = ? GROUP BY cs.id ORDER BY cs.opened_at DESC LIMIT 50`, [req.user.businessId, req.user.id],
+     WHERE cs.business_id = ? AND cs.user_id = ? GROUP BY cs.id ORDER BY cs.opened_at DESC LIMIT ? OFFSET ?`,
+    [req.user.businessId, req.user.id, limit, offset],
   );
-  res.json({ active: items.find((item) => item.status === 'open') || null, items });
+  const [activeRows] = await pool.execute(
+    `SELECT cs.id, cs.status, cs.opening_balance AS openingBalance, cs.actual_cash AS actualCash, cs.discrepancy_note AS discrepancyNote, cs.opened_at AS openedAt, cs.closed_at AS closedAt,
+      cs.opening_balance + COALESCE(SUM(CASE WHEN cm.movement_type='opening_float' THEN 0 WHEN cm.direction='in' THEN cm.amount WHEN cm.direction='out' THEN -cm.amount ELSE 0 END),0) AS expectedCash
+     FROM cash_sessions cs LEFT JOIN cash_movements cm ON cm.session_id = cs.id AND cm.business_id = cs.business_id
+     WHERE cs.business_id = ? AND cs.user_id = ? AND cs.status = 'open' GROUP BY cs.id LIMIT 1`,
+    [req.user.businessId, req.user.id],
+  );
+  res.json({ active: activeRows[0] || null, items, meta: { page: safePage, limit, totalRecords, totalPages } });
 }));
 
 router.post('/cash-sessions', authorize('owner', 'manager', 'cashier'), asyncRoute(async (req, res) => {
@@ -962,8 +1096,17 @@ router.get('/reports', authorize('owner', 'manager', 'accountant'), asyncRoute(a
 }));
 
 router.get('/users', authorize('owner'), asyncRoute(async (req, res) => {
-  const [items] = await pool.execute('SELECT id,name,email,role,active,created_at AS createdAt FROM users WHERE business_id=? ORDER BY created_at', businessScope(req));
-  res.json({ items });
+  const { page, limit } = parsePageParams(req, { page: 1, limit: 10, sortBy: 'createdAt', sortOrder: 'asc' });
+  const [countRows] = await pool.execute('SELECT COUNT(*) AS total FROM users WHERE business_id=?', businessScope(req));
+  const totalRecords = Number(countRows[0]?.total || 0);
+  const totalPages = totalRecords === 0 ? 0 : Math.ceil(totalRecords / limit);
+  const safePage = totalPages === 0 ? 1 : Math.min(page, totalPages);
+  const offset = (safePage - 1) * limit;
+  const [items] = await pool.execute(
+    'SELECT id,name,email,role,active,created_at AS createdAt FROM users WHERE business_id=? ORDER BY created_at LIMIT ? OFFSET ?',
+    [req.user.businessId, limit, offset],
+  );
+  res.json({ items, meta: { page: safePage, limit, totalRecords, totalPages } });
 }));
 
 router.post('/users', authorize('owner'), asyncRoute(async (req, res) => {

@@ -55,13 +55,16 @@ assert.equal(openingStock.status, 201, `Opening stock failed: ${openingStock.dat
 const supplierResponse = await request('/suppliers', { method: 'POST', token, body: { name: `Smoke Supplier ${suffix}` } });
 assert.equal(supplierResponse.status, 201);
 const supplierId = supplierResponse.data.supplier.id;
-const purchase = await request('/purchases', { method: 'POST', token, body: { supplierId, items: [{ productId: product.id, unitId: crateUnit.id, quantity: '5', unitCost: '15000' }], payments: [{ method: 'mobile_money', amount: '5000' }] } });
+const purchase = await request('/purchases', { method: 'POST', token, body: { supplierId, items: [{ productId: product.id, unitId: crateUnit.id, quantity: '5', unitCost: '15000', sellingPrice: '36000' }], payments: [{ method: 'mobile_money', amount: '5000' }] } });
 assert.equal(purchase.status, 201, `Purchase receiving failed: ${purchase.data.error}`);
 assert.equal(purchase.data.purchase.total, '75000.00');
 assert.equal(purchase.data.purchase.balanceDue, '70000.00');
 const receivedProducts = (await request('/products', { token })).data.items;
 assert.equal(receivedProducts.find((item) => item.id === product.id).stockQuantity, '200.000', 'Five crates of twenty base units each must add one hundred base units');
 assert.equal(receivedProducts.find((item) => item.id === product.id).costPrice, '875.00', 'Receiving should update the weighted-average base cost');
+const repricedUnits = await request(`/products/${product.id}/units`, { token });
+assert.equal(repricedUnits.data.items.find((unit) => unit.id === crateUnit.id).sellingPrice, '36000.00', 'Receiving should update the selected unit selling price');
+await request(`/products/${product.id}/units/${crateUnit.id}`, { method: 'PATCH', token, body: { sellingPrice: '35000' } });
 const supplierPayment = await request(`/suppliers/${supplierId}/payments`, { method: 'POST', token, body: { amount: '10000', method: 'mobile_money' } });
 assert.equal(supplierPayment.status, 201, `Supplier payment failed: ${supplierPayment.data.error}`);
 assert.equal(supplierPayment.data.payment.balanceDue, '60000.00');

@@ -4,6 +4,7 @@ import api from '../services/api.js';
 import { useAuth } from '../state/AuthContext.jsx';
 import ReceiptCard from '../components/ReceiptCard.jsx';
 import { downloadReceipt } from '../utils/receipt.js';
+import TablePagination from '../components/TablePagination.jsx';
 
 const money = (n) => new Intl.NumberFormat('en-RW', { style: 'currency', currency: 'RWF', maximumFractionDigits: 0 }).format(Number(n || 0));
 const cents = (value) => { const [whole, decimal = ''] = String(value ?? '0').split('.'); return BigInt(whole || '0') * 100n + BigInt(decimal.padEnd(2, '0').slice(0, 2)); };
@@ -22,15 +23,15 @@ const canReturn = (user) => ['owner', 'manager', 'accountant'].includes(user?.ro
 export default function Sales() {
   const { user } = useAuth();
   const [items, setItems] = useState([]); const [query, setQuery] = useState(''); const [sale, setSale] = useState(null); const [error, setError] = useState('');
+  const [page, setPage] = useState(1); const [limit, setLimit] = useState(10); const [meta, setMeta] = useState({ page: 1, limit: 10, totalRecords: 0, totalPages: 0 });
   const [returnMode, setReturnMode] = useState(false); const [returnQuantities, setReturnQuantities] = useState({}); const [restock, setRestock] = useState({});
   const [refundMethod, setRefundMethod] = useState('mobile_money'); const [returnReason, setReturnReason] = useState(''); const [returnBusy, setReturnBusy] = useState(false); const [notice, setNotice] = useState('');
-  async function load() { try { const { data } = await api.get('/sales'); setItems(data.items); setError(''); } catch { setError('Sales history could not be loaded.'); } }
-  useEffect(() => { load(); }, []);
+  async function load() { try { const { data } = await api.get('/sales', { params: { page, limit, search: query } }); setItems(data.items); setMeta(data.meta); setPage(data.meta.page); setError(''); } catch { setError('Sales history could not be loaded.'); } }
+  useEffect(() => { load(); }, [page, limit, query]);
   async function openReceipt(id) {
     try { const { data } = await api.get(`/sales/${id}`); setSale(data.sale); setReturnMode(false); setError(''); }
     catch (err) { setError(err.response?.data?.error || 'Sale details could not be loaded.'); }
   }
-  const filtered = items.filter((item) => `${item.reference} ${item.customerName}`.toLowerCase().includes(query.toLowerCase()));
   const selectedLines = useMemo(() => sale?.items.filter((line) => Number(returnQuantities[line.id] || 0) > 0).map((line) => ({
     saleItemId: line.id, quantity: String(returnQuantities[line.id]), restock: restock[line.id], amount: returnValue(line, returnQuantities[line.id]),
   })) || [], [sale, returnQuantities, restock]);
@@ -55,8 +56,8 @@ export default function Sales() {
   return <div className="content-page">
     <div className="page-heading"><div><div className="date-label">TRANSACTION HISTORY</div><h1>Sales</h1><p>Review completed transactions, payment splits, receipts, and authorized returns.</p></div></div>
     {error && <div className="notice notice-error">{error}</div>}{notice && <div className="notice notice-success">{notice}</div>}
-    <div className="table-toolbar"><div className="search-box"><Search size={17} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search reference or customer" /></div><span className="result-count">{filtered.length} sales</span></div>
-    <div className="panel table-panel"><div className="table-scroll"><table><thead><tr><th>REFERENCE</th><th>DATE</th><th>CUSTOMER</th><th>ORIGINAL</th><th>RETURNED</th><th>PAID</th><th>BALANCE</th><th>STATUS</th><th></th></tr></thead><tbody>{filtered.map((item) => <tr key={item.id}><td><b>{item.reference}</b></td><td>{new Date(item.createdAt).toLocaleString()}</td><td>{item.customerName}</td><td className="table-money">{money(item.total)}</td><td>{money(item.returnedTotal)}</td><td>{money(item.amountPaid)}</td><td>{money(item.balanceDue)}</td><td>{item.status?.replace('_', ' ') || item.paymentStatus}</td><td><button className="button button-small button-outline" onClick={() => openReceipt(item.id)}>Details <ArrowUpRight size={13} /></button></td></tr>)}</tbody></table>{!filtered.length && <div className="table-empty"><b>No matching sales</b><span>Completed transactions will appear here.</span></div>}</div></div>
+    <div className="table-toolbar"><div className="search-box"><Search size={17} /><input value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} placeholder="Search reference or customer" /></div><span className="result-count">{meta.totalRecords} sales</span></div>
+    <div className="panel table-panel"><div className="table-scroll"><table><thead><tr><th>#</th><th>REFERENCE</th><th>DATE</th><th>CUSTOMER</th><th>ORIGINAL</th><th>RETURNED</th><th>PAID</th><th>BALANCE</th><th>STATUS</th><th></th></tr></thead><tbody>{items.map((item, index) => <tr key={item.id}><td>{(page - 1) * limit + index + 1}</td><td><b>{item.reference}</b></td><td>{new Date(item.createdAt).toLocaleString()}</td><td>{item.customerName}</td><td className="table-money">{money(item.total)}</td><td>{money(item.returnedTotal)}</td><td>{money(item.amountPaid)}</td><td>{money(item.balanceDue)}</td><td>{item.status?.replace('_', ' ') || item.paymentStatus}</td><td><button className="button button-small button-outline" onClick={() => openReceipt(item.id)}>Details <ArrowUpRight size={13} /></button></td></tr>)}</tbody></table>{!items.length && <div className="table-empty"><b>No matching sales</b><span>Completed transactions will appear here.</span></div>}</div><TablePagination page={page} meta={meta} limit={limit} onPageChange={setPage} onLimitChange={(value) => { setLimit(value); setPage(1); }} /></div>
     {sale && <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setSale(null)}><div className="modal receipt-modal return-modal">
       <div className="modal-title no-print"><div><span className="section-label">SALE RECORD</span><h2>{sale.reference}</h2></div><button className="icon-button" onClick={() => setSale(null)} aria-label="Close"><X size={18} /></button></div>
       <ReceiptCard sale={sale} businessName={user?.businessName || 'Umucyobar'} />

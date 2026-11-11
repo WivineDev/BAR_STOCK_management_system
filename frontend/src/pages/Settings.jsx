@@ -1,10 +1,19 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Armchair, Check, Layers, LoaderCircle, Package, PencilLine, Plus, Search, Settings as SettingsIcon, Trash2, X } from 'lucide-react';
 import api from '../services/api.js';
 import { useAuth } from '../state/AuthContext.jsx';
+import TablePagination from '../components/TablePagination.jsx';
 
 const money = (n) => new Intl.NumberFormat('en-RW', { style: 'currency', currency: 'RWF', maximumFractionDigits: 0 }).format(Number(n || 0));
 const TABLE_STATUS_OPTIONS = [['available', 'Available'], ['reserved', 'Reserved'], ['out_of_service', 'Out of service']];
+function pageRows(items, page, limit) {
+  const totalPages = Math.ceil(items.length / limit);
+  const currentPage = totalPages ? Math.min(page, totalPages) : 1;
+  return {
+    items: items.slice((currentPage - 1) * limit, currentPage * limit),
+    meta: { page: currentPage, limit, totalRecords: items.length, totalPages },
+  };
+}
 
 export default function Settings() {
   const { user } = useAuth();
@@ -22,11 +31,14 @@ export default function Settings() {
 function FloorSettings() {
   const [areas, setAreas] = useState([]);
   const [tables, setTables] = useState([]);
+  const [areaPage, setAreaPage] = useState(1); const [tablePage, setTablePage] = useState(1); const [listLimit, setListLimit] = useState(10);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const [areaForm, setAreaForm] = useState(null);
   const [tableForm, setTableForm] = useState(null);
+  const areaRows = pageRows(areas, areaPage, listLimit);
+  const tableRows = pageRows(tables, tablePage, listLimit);
 
   async function load() {
     try { const { data } = await api.get('/floor'); setAreas(data.areas); setTables(data.tables); setError(''); } catch { setError('Floor configuration could not be loaded.'); }
@@ -68,8 +80,8 @@ function FloorSettings() {
         <div className="panel-heading padded-heading"><div><span className="section-label">FLOOR AREAS</span><h2>Service areas</h2></div>
           <button className="button button-small button-primary" onClick={() => setAreaForm({ name: '', sortOrder: areas.length + 1 })}><Plus size={14} /> Add area</button></div>
         <div className="settings-list">
-          {areas.map((area) => <div className="settings-row" key={area.id}>
-            <div className="settings-row-copy"><b>{area.name}</b><small>Order {area.sortOrder} · {tables.filter((t) => t.areaId === area.id).length} tables{area.active ? '' : ' · inactive'}</small></div>
+          {areaRows.items.map((area, index) => <div className="settings-row" key={area.id}>
+            <div className="settings-row-copy"><b>{area.name}</b><small>#{(areaRows.meta.page - 1) * listLimit + index + 1} · Order {area.sortOrder} · {tables.filter((t) => t.areaId === area.id).length} tables{area.active ? '' : ' · inactive'}</small></div>
             <div className="settings-row-actions">
               <button className="icon-button" aria-label={`Edit ${area.name}`} onClick={() => setAreaForm({ id: area.id, name: area.name, sortOrder: area.sortOrder })}><PencilLine size={15} /></button>
               <button className="icon-button" aria-label={`${area.active ? 'Deactivate' : 'Reactivate'} ${area.name}`} disabled={busy} onClick={() => toggleArea(area)}><Trash2 size={15} /></button>
@@ -77,20 +89,22 @@ function FloorSettings() {
           </div>)}
           {!areas.length && <div className="settings-empty"><Layers size={19} /><b>No areas yet</b><span>Create Main Hall, Terrace or VIP to group your tables.</span></div>}
         </div>
+        <TablePagination page={areaPage} meta={areaRows.meta} limit={listLimit} onPageChange={setAreaPage} onLimitChange={(value) => { setListLimit(value); setAreaPage(1); setTablePage(1); }} />
       </section>
       <section className="panel settings-panel">
         <div className="panel-heading padded-heading"><div><span className="section-label">TABLES</span><h2>Numbered tables</h2></div>
           <button className="button button-small button-primary" disabled={!areas.some((a) => a.active)} onClick={() => setTableForm({ code: '', name: '', areaId: areas.find((a) => a.active)?.id || '', capacity: 4, floorPosition: tables.length + 1, status: 'available' })}><Plus size={14} /> Add table</button></div>
         <div className="settings-list">
-          {tables.map((table) => <div className="settings-row" key={table.id}>
+          {tableRows.items.map((table, index) => <div className="settings-row" key={table.id}>
             <div className="settings-row-copy"><b>{table.code}{table.name ? ` · ${table.name}` : ''}</b>
-              <small>{areas.find((a) => a.id === table.areaId)?.name || 'No area'} · {table.capacity} seats · {table.effectiveStatus === 'occupied' ? 'Session open' : table.status.replace('_', ' ')}{table.active ? '' : ' · inactive'}</small></div>
+              <small>#{(tableRows.meta.page - 1) * listLimit + index + 1} · {areas.find((a) => a.id === table.areaId)?.name || 'No area'} · {table.capacity} seats · {table.effectiveStatus === 'occupied' ? 'Session open' : table.status.replace('_', ' ')}{table.active ? '' : ' · inactive'}</small></div>
             <div className="settings-row-actions">
               <button className="icon-button" aria-label={`Edit ${table.code}`} disabled={table.effectiveStatus === 'occupied'} onClick={() => setTableForm({ id: table.id, code: table.code, name: table.name || '', areaId: table.areaId, capacity: table.capacity, floorPosition: table.floorPosition, status: table.effectiveStatus === 'occupied' ? 'available' : table.status })}><PencilLine size={15} /></button>
             </div>
           </div>)}
           {!tables.length && <div className="settings-empty"><Armchair size={19} /><b>No tables yet</b><span>Add T01, T02 and so on — customers stay anonymous.</span></div>}
         </div>
+        <TablePagination page={tablePage} meta={tableRows.meta} limit={listLimit} onPageChange={setTablePage} onLimitChange={(value) => { setListLimit(value); setAreaPage(1); setTablePage(1); }} />
       </section>
     </div>
     {areaForm && <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setAreaForm(null)}>
@@ -120,19 +134,25 @@ function FloorSettings() {
 
 function UnitsSettings() {
   const [products, setProducts] = useState([]);
+  const [productPage, setProductPage] = useState(1); const [productLimit, setProductLimit] = useState(10); const [productMeta, setProductMeta] = useState({ page: 1, limit: 10, totalRecords: 0, totalPages: 0 });
   const [selected, setSelected] = useState(null);
   const [units, setUnits] = useState([]);
+  const [unitPage, setUnitPage] = useState(1); const [unitLimit, setUnitLimit] = useState(10);
   const [productQuery, setProductQuery] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const [unitForm, setUnitForm] = useState(null);
+  const unitRows = pageRows(units, unitPage, unitLimit);
 
-  useEffect(() => { api.get('/products').then(({ data }) => setProducts(data.items)).catch(() => setError('Products could not be loaded.')); }, []);
-  const shown = useMemo(() => products.filter((product) => `${product.name} ${product.sku || ''}`.toLowerCase().includes(productQuery.trim().toLowerCase())).slice(0, 12), [products, productQuery]);
+  useEffect(() => {
+    api.get('/products', { params: { page: productPage, limit: productLimit, search: productQuery } })
+      .then(({ data }) => { setProducts(data.items); setProductMeta(data.meta); setProductPage(data.meta.page); })
+      .catch(() => setError('Products could not be loaded.'));
+  }, [productPage, productLimit, productQuery]);
 
   async function loadUnits(product) {
-    setSelected(product); setUnits([]); setError(''); setNotice('');
+    setSelected(product); setUnits([]); setUnitPage(1); setError(''); setNotice('');
     try { const { data } = await api.get(`/products/${product.id}/units`); setUnits(data.items); } catch { setError('Units for this product could not be loaded.'); }
   }
 
@@ -160,13 +180,14 @@ function UnitsSettings() {
     <div className="settings-columns units-layout">
       <section className="panel settings-panel">
         <div className="panel-heading padded-heading"><div><span className="section-label">SELECT PRODUCT</span><h2>Choose a product</h2></div><SettingsIcon size={17} /></div>
-        <div className="search-box"><Search size={16} /><input value={productQuery} onChange={(event) => setProductQuery(event.target.value)} placeholder="Search products" aria-label="Search products" /></div>
+        <div className="search-box"><Search size={16} /><input value={productQuery} onChange={(event) => { setProductQuery(event.target.value); setProductPage(1); }} placeholder="Search products" aria-label="Search products" /></div>
         <div className="settings-list product-select-list">
-          {shown.map((product) => <button type="button" className={`settings-row selectable ${selected?.id === product.id ? 'selected' : ''}`} key={product.id} onClick={() => loadUnits(product)}>
-            <div className="settings-row-copy"><b>{product.name}</b><small>{product.sku ? `SKU ${product.sku} · ` : ''}base: {product.baseUnit}</small></div>
+          {products.map((product, index) => <button type="button" className={`settings-row selectable ${selected?.id === product.id ? 'selected' : ''}`} key={product.id} onClick={() => loadUnits(product)}>
+            <div className="settings-row-copy"><b>{product.name}</b><small>#{(productMeta.page - 1) * productLimit + index + 1} · {product.sku ? `SKU ${product.sku} · ` : ''}base: {product.baseUnit}</small></div>
           </button>)}
-          {!shown.length && <div className="settings-empty"><Package size={19} /><b>No products match</b><span>Try another name or SKU.</span></div>}
+          {!products.length && <div className="settings-empty"><Package size={19} /><b>No products match</b><span>Try another name or SKU.</span></div>}
         </div>
+        <TablePagination page={productPage} meta={productMeta} limit={productLimit} onPageChange={setProductPage} onLimitChange={(value) => { setProductLimit(value); setProductPage(1); }} />
       </section>
       <section className="panel settings-panel">
         <div className="panel-heading padded-heading"><div><span className="section-label">UNITS &amp; CONVERSIONS</span><h2>{selected ? selected.name : 'No product selected'}</h2></div>
@@ -174,8 +195,9 @@ function UnitsSettings() {
         {selected ? <>
           <p className="units-note">Each product keeps its own conversion. {selected.baseUnit} is the base stock unit — every quantity is stored in it, and crate size is set per product, never globally.</p>
           <div className="table-scroll"><table className="units-table">
-            <thead><tr><th>UNIT</th><th>{selected.baseUnit.toUpperCase()}S PER UNIT</th><th>SELLS FOR</th><th>PURCHASE COST</th><th></th></tr></thead>
-            <tbody>{units.map((unit) => <tr key={unit.id} className={unit.active ? '' : 'muted-row'}>
+            <thead><tr><th>#</th><th>UNIT</th><th>{selected.baseUnit.toUpperCase()}S PER UNIT</th><th>SELLS FOR</th><th>PURCHASE COST</th><th></th></tr></thead>
+            <tbody>{unitRows.items.map((unit, index) => <tr key={unit.id} className={unit.active ? '' : 'muted-row'}>
+              <td>{(unitRows.meta.page - 1) * unitLimit + index + 1}</td>
               <td><b>{unit.unitName}</b>{Number(unit.isBase) === 1 && <small className="base-tag">base</small>}</td>
               <td>{unit.factorToBase}</td>
               <td>{money(unit.sellingPrice)}</td>
@@ -186,6 +208,7 @@ function UnitsSettings() {
               </td>
             </tr>)}</tbody>
           </table></div>
+          <TablePagination page={unitPage} meta={unitRows.meta} limit={unitLimit} onPageChange={setUnitPage} onLimitChange={(value) => { setUnitLimit(value); setUnitPage(1); }} />
           <small className="units-footnote">Completed purchases and sales keep the conversion used at the time — changing a crate size only affects future transactions.</small>
         </> : <div className="settings-empty"><Layers size={19} /><b>Pick a product</b><span>Configure how bottles, crates and packs convert for each drink.</span></div>}
       </section>

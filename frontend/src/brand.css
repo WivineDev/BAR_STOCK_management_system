@@ -1756,6 +1756,38 @@ body {
   border-radius: inherit;
 }
 
+.purchase-line {
+  grid-template-columns: 1.2fr 1fr .55fr .75fr .75fr 25px;
+}
+
+@media (max-width: 820px) {
+  .purchase-line {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 520px) {
+  .purchase-line {
+    grid-template-columns: 1fr;
+  }
+}
+
+.products-page .table-panel tbody {
+  counter-reset: product-row var(--page-offset, 0);
+}
+
+.products-page .table-panel tbody tr {
+  counter-increment: product-row;
+}
+
+.products-page .table-panel .product-cell::before {
+  content: counter(product-row) ".";
+  flex: 0 0 24px;
+  color: #8A93A8;
+  font-variant-numeric: tabular-nums;
+  font-size: 10px;
+}
+
 /* Image gallery picker in the product form */
 .image-field {
   margin: 2px 0;
