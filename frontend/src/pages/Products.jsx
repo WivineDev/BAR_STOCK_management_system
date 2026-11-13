@@ -16,7 +16,7 @@ export default function Products() {
   const [form, setForm] = useState(emptyProduct()); const [editingProduct, setEditingProduct] = useState(null); const [unitTarget, setUnitTarget] = useState(null); const [units, setUnits] = useState([]); const [unitForm, setUnitForm] = useState(emptyUnit());
   async function load(nextPage = page, nextSearch = search) { try { const { data } = await api.get('/products', { params: { search: nextSearch, page: nextPage, limit, sortBy: 'createdAt', sortOrder: 'desc' } }); setItems(data.items); setMeta(data.meta || { page: nextPage, limit, totalRecords: 0, totalPages: 0 }); setError(''); } catch { setError('Products could not be loaded.'); } }
   useEffect(() => { load(page); }, [search, page, limit]);
-  useEffect(() => { api.get('/categories').then(({ data }) => setCategories(data.items)).catch(() => {}); }, []);
+  useEffect(() => { api.get('/categories').then(({ data }) => setCategories(data.items)).catch(() => { }); }, []);
   function closeProductForm() { setShow(false); setEditingProduct(null); setForm(emptyProduct()); }
   function editProduct(product) {
     setEditingProduct(product);
